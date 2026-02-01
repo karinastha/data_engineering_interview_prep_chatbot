@@ -1,0 +1,26 @@
+Competency Area,Topics,Must Have,Desirable,Advanced/ Best
+SQL,Core Analytical & Engineering Competency,,,
+,"A. Fundamentals (DDL, DML, DQL)",,,
+,"Filtering, Grouping, Aggregations","Comfortable with filtering rows (WHERE), grouping data (GROUP BY), and applying aggregate functions like SUM, AVG, COUNT.","Uses HAVING with grouping, writes nested aggregations.","Optimizes aggregations for large datasets with rollups, cubes, or materialized views."
+,"Joins (Inner, Outer, Self, Cross, Left, Right)","Uses INNER, LEFT, and RIGHT joins effectively to combine datasets.","Understands FULL OUTER, CROSS, and SELF joins; applies them in real use cases.",Optimizes multi-join queries across large relational schemas.
+,Null handling,"Understands NULLs, IS NULL, and default values in queries.","Uses COALESCE, NULLIF, and CASE for flexible null handling.",Designs robust queries and transformations that handle nulls in complex pipelines.
+,B. Intermediate SQL,,,
+,Subqueries (Correlated and Uncorrelated),Writes simple uncorrelated subqueries.,Uses correlated subqueries effectively in filtering or transformations.,Refactors subqueries into optimized CTEs or joins for performance.
+,CTEs,Uses simple WITH clauses for readability.,Writes layered or recursive CTEs for moderately complex queries.,Structures multi-step query logic with multiple CTEs for production workloads.
+,"Window Functions (ROW_NUMBER, RANK, LAG, LEAD, moving averages)","Applies ROW_NUMBER, RANK, and simple LAG/LEAD for ordering.","Uses advanced windowing like moving averages, partitions, or percentiles.",Tunes heavy window functions for big data performance in distributed systems.
+,"Set operations (UNION, EXCEPT, INTERSECT)",Applies UNION and UNION ALL correctly.,Uses INTERSECT and EXCEPT for deduplication and comparisons.,Combines multiple set operations with performance optimization techniques.
+,"Conditional logic (CASE, COALESCE)",Uses CASE statements for basic conditional output.,Applies COALESCE and nested CASE for data transformation logic.,Designs complex conditional transformations in ETL pipelines.
+,NoSQL Queries,"Has awareness of querying styles in document/column stores (e.g., MongoDB aggregate pipeline).",Combines SQL and NoSQL queries in hybrid or federated systems.,
+,C. Advanced SQL,,,
+,Data Validation and Testing,Compares query outputs against expected results.,Writes validation queries for ETL and QA workflows.,Implements automated data testing and quality checks.
+,Transactions and Error Handling,Executes BEGIN/COMMIT/ROLLBACK in scripts.,Implements error handling in stored procedures.,Designs complex transactional logic across multiple tables or systems.
+,Stored Procedures and User-defined functions,Reads and uses existing stored procedures.,Writes simple stored procedures and user-defined functions.,"Optimizes, modularizes, and manages stored procedure libraries."
+,Recursive Queries,,"Writes recursive CTEs for hierarchy queries (e.g., org charts).",Optimizes recursive queries for performance in large datasets.
+,"Temp tables, materialized views",Uses temp tables for ad hoc analysis.,Creates materialized views for performance and reuse.,Designs and manages refresh strategies for production-grade materialized views.
+,"Dynamic SQL, parameterized queries",,Writes parameterized queries to prevent SQL injection.,"Implements dynamic SQL for flexible, automated pipelines."
+,Familiarity with ORMs,,Familiar with ORMs,
+,D. Performance and Optimization,,,
+,"Query optimization (EXPLAIN, indexing, query hints)","Can run EXPLAIN (or equivalent) to understand query plans at a basic level (e.g., see if indexes are used, detect full table scans).",Interprets execution plans to spot performance bottlenecks; rewrites queries to improve efficiency.,Uses query hints and advanced tuning techniques; understands cost-based optimizers and can fine-tune queries at scale.
+,"Index usage (B-tree, bitmap, clustered, covering indexes)",Understands and applies single-column B-tree indexes for filtering and joins.,"Familiar with composite indexes, clustered indexes, and covering indexes for complex queries.","Designs and manages specialized indexes (bitmap, partial, functional) for high-performance workloads."
+,Partitioning for performance,"Aware of what partitioning is and when it might help (e.g., splitting large tables by date).",Applies table partitioning in practice for moderately large datasets; understands partition pruning.,"Designs partitioning strategies for enterprise-scale data (hash, list, range); balances query performance with storage and maintenance."
+,Best practices for large-scale queries,"Writes queries that avoid common anti-patterns (e.g., SELECT * in production, unnecessary DISTINCT).","Optimizes queries that run on millions of rows, uses CTEs/materialized views for efficiency.","Applies best practices for distributed SQL engines (e.g., SparkSQL, BigQuery, Presto); tunes queries for parallelism and scalability."
