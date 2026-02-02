@@ -214,26 +214,21 @@ Key Interview Notes:
 
 ```
 data_engineering_interview_prep_chatbot/
-├── app.py                   # Streamlit chatbot application
-├── data/
-│   ├── raw_docs/            # Source CSV files
-│   │   ├── DE docs - Python.csv
-│   │   ├── DE docs - SQL.csv
-│   │   ├── DE docs - Database.csv
-│   │   └── DE docs - ETL.csv
-│   └── vector_db/           # ChromaDB vector store (created after ingestion)
-│       └── chroma.sqlite3
-├── src/
-│   ├── __init__.py
-│   ├── ingestion_csv.py     # CSV document loading and vector store creation
-│   └── rag_retrieval.py     # RAG retrieval and answer generation
-├── utils/
-│   └── helper_cred.py       # AWS Bedrock LLM & embeddings configuration
-├── .env                     # Environment variables (create from .env.example)
-├── .env.example             # Environment template
-├── pyproject.toml           # UV project configuration
-├── requirements.txt         # Python dependencies
-└── README.md
+app_modern.py (Streamlit UI)
+├── services/
+│   ├── chat_service.py      # Conversation orchestration
+│   ├── rag_service.py       # RAG pipeline management  
+│   ├── memory_service.py    # Conversation persistence
+│   └── prompt_service.py    # Template & few-shot management
+├── infrastructure/
+│   ├── vector_store/        # ChromaDB operations
+│   ├── llm/                 # AWS Bedrock client
+│   └── embeddings/          # HuggingFace embeddings
+├── core/
+│   ├── models/              # Domain models & data structures
+│   └── exceptions/          # Custom exception hierarchy
+└── config/
+    └── settings.py          # Configuration management
 ```
 
 ### RAG Pipeline Flow
@@ -472,7 +467,7 @@ active user IDs: `active_users = [user['id'] for user in users if user['status']
 This is more efficient and readable than traditional loops.
 ```
 
-## 🌟 Features Highlight
+## Features Highlight
 
 - ✅ **Conversational Interface** - Natural dialogue flow
 - ✅ **Topic-Filtered Retrieval** - Accurate, relevant content
@@ -483,7 +478,7 @@ This is more efficient and readable than traditional loops.
 - ✅ **Persistent Storage** - ChromaDB for efficient queries
 - ✅ **Streamlit UI** - Beautiful, responsive interface
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! To contribute:
 1. Fork the repository
@@ -502,11 +497,11 @@ Contributions are welcome! To contribute:
 - Add testing coverage
 - Optimize retrieval performance
 
-## 📄 License
+## License
 
 This project is for educational purposes. Check individual dependencies for their licenses.
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - LangChain for the RAG framework
 - AWS Bedrock for Nova Lite and Titan Embeddings
@@ -516,4 +511,4 @@ This project is for educational purposes. Check individual dependencies for thei
 
 ---
 
-**Good luck with your Data Engineering interviews! 💼🚀**
+**Good luck with your Data Engineering interviews! **
