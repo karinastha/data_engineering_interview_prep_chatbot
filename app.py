@@ -32,7 +32,7 @@ def initialize_session_state():
         st.session_state.selected_topic = None
     
     if "conversation_stage" not in st.session_state:
-        st.session_state.conversation_stage = "greeting"  # greeting, topic_selection, practicing
+        st.session_state.conversation_stage = "greeting" 
     
     # Initialize RAG system with error handling
     if "rag_system" not in st.session_state:
@@ -93,6 +93,32 @@ I'll generate practice questions and key competencies from the documentation.
     st.session_state.messages.append({"role": "assistant", "content": topic_msg})
 
 
+def format_conversation_history(messages: list, max_messages: int = 6) -> str:
+    """
+    Format conversation history for RAG context.
+    
+    Args:
+        messages: List of chat messages
+        max_messages: Maximum recent messages to include
+        
+    Returns:
+        Formatted conversation history string
+    """
+    if not messages or len(messages) < 2:
+        return "This is the start of the conversation."
+    
+    # Get recent messages (excluding the current user message being processed)
+    recent_messages = messages[-max_messages:-1] if len(messages) > 1 else messages[:-1]
+    
+    formatted_history = []
+    for msg in recent_messages:
+        role = "Human" if msg["role"] == "user" else "Assistant"
+        # Truncate long messages to keep context manageable
+        content = msg["content"][:200] + "..." if len(msg["content"]) > 200 else msg["content"]
+        formatted_history.append(f"{role}: {content}")
+    
+    return "\n".join(formatted_history)
+
 def detect_topic_from_message(message: str) -> str:
     """
     Detect topic from user message with improved pattern matching.
@@ -128,7 +154,7 @@ def detect_topic_from_message(message: str) -> str:
 
 def handle_user_input(user_message: str):
     """
-    Handle user input and generate responses.
+    Handle user input and generate responses with conversation memory.
     
     Args:
         user_message: User's message
@@ -137,6 +163,9 @@ def handle_user_input(user_message: str):
     
     print(f"[DEBUG] Processing message: {user_message}")
     print(f"[DEBUG] Current stage: {st.session_state.conversation_stage}")
+    
+    # Get formatted conversation history for context
+    chat_history = format_conversation_history(st.session_state.messages)
     
     # Stage 1: Greeting/Initial request
     if st.session_state.conversation_stage == "greeting":
@@ -149,10 +178,10 @@ def handle_user_input(user_message: str):
             st.session_state.selected_topic = topic
             st.session_state.conversation_stage = "practicing"
             
-            # Generate practice content immediately
+            # Generate practice content immediately with conversation context
             try:
                 print(f"[DEBUG] Generating practice questions for {topic}...")
-                response = st.session_state.rag_system.generate_practice_questions(topic)
+                response = st.session_state.rag_system.generate_practice_questions(topic, chat_history)
                 print(f"[DEBUG] Response generated, length: {len(response)}")
                 
                 st.session_state.messages.append({"role": "assistant", "content": response})
@@ -188,9 +217,9 @@ def handle_user_input(user_message: str):
             st.session_state.selected_topic = topic
             st.session_state.conversation_stage = "practicing"
             
-            # Generate practice content for the selected topic
+            # Generate practice content for the selected topic with conversation context
             with st.spinner(f"🔍 Retrieving {topic} competencies and generating practice questions..."):
-                response = st.session_state.rag_system.generate_practice_questions(topic)
+                response = st.session_state.rag_system.generate_practice_questions(topic, chat_history)
             
             st.session_state.messages.append({"role": "assistant", "content": response})
             
@@ -211,10 +240,10 @@ def handle_user_input(user_message: str):
             display_topic_selection_message()
         
         # Check if user asks for more questions/list for current topic
-        elif any(keyword in user_message_lower for keyword in ["give me list", "list of", "more questions", "practice questions", "interview questions"]) and st.session_state.selected_topic:
+        elif any(keyword in user_message_lower for keyword in ["give me list", "list of", "more questions", "practice questions", "interview questions", "scenario", "scenarios"]) and st.session_state.selected_topic:
             with st.spinner(f"🔍 Generating more {st.session_state.selected_topic} practice questions..."):
                 try:
-                    response = st.session_state.rag_system.generate_practice_questions(st.session_state.selected_topic)
+                    response = st.session_state.rag_system.generate_practice_questions(st.session_state.selected_topic, chat_history)
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e:
                     error_msg = f"⚠️ Error: {str(e)}. Please try again."
@@ -227,7 +256,7 @@ def handle_user_input(user_message: str):
                 
                 with st.spinner(f"🔍 Switching to {new_topic}..."):
                     try:
-                        response = st.session_state.rag_system.generate_practice_questions(new_topic)
+                        response = st.session_state.rag_system.generate_practice_questions(new_topic, chat_history)
                         st.session_state.messages.append({"role": "assistant", "content": response})
                         
                         follow_up = f"\n\n---\n\n💡 Ask me specific questions about {new_topic}, or say 'more topics' to explore other areas!"
@@ -239,19 +268,20 @@ def handle_user_input(user_message: str):
                 # User mentioned current topic - regenerate questions
                 with st.spinner(f"🔍 Generating {new_topic} practice content..."):
                     try:
-                        response = st.session_state.rag_system.generate_practice_questions(new_topic)
+                        response = st.session_state.rag_system.generate_practice_questions(new_topic, chat_history)
                         st.session_state.messages.append({"role": "assistant", "content": response})
                     except Exception as e:
                         error_msg = f"⚠️ Error: {str(e)}"
                         st.session_state.messages.append({"role": "assistant", "content": error_msg})
         
-        # Answer specific questions about current topic
+        # Answer specific questions about current topic with conversation context
         else:
             with st.spinner("💭 Generating answer..."):
                 try:
                     response = st.session_state.rag_system.answer_question(
                         user_message,
-                        topic=st.session_state.selected_topic
+                        topic=st.session_state.selected_topic,
+                        chat_history=chat_history
                     )
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 except Exception as e:

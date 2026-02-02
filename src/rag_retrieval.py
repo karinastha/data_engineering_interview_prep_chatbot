@@ -25,12 +25,162 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from utils.helper_cred import llm, embeddings
+import random
 
 # RAG Configuration Constants - Optimized for performance and accuracy
 OPTIMAL_TOP_K = 4  # Balanced: not too few (missing context) or too many (noise)
 SIMILARITY_THRESHOLD = 0.3  # Min similarity score (HuggingFace embeddings use cosine similarity ~0-1)
 MAX_RETRIEVAL_DOCS = 6  # Maximum documents for topic-specific queries
 
+# Enhanced Few-Shot Examples Repository
+FEWSHOT_EXAMPLES = {
+    "Python": [
+        {
+            "question": "What are list comprehensions in Python?",
+            "answer": """📚 **Definition:**
+List comprehensions are a concise, Pythonic way to create lists by applying an expression to each item in an iterable, with optional filtering conditions.
+
+💡 **Use Case:**
+In ETL pipelines, list comprehensions efficiently transform and filter data in-memory before loading to databases. They're faster and more readable than traditional for-loops for data transformation tasks.
+
+🚀 **Real-World Example:**
+In a production pipeline processing user events:
+```python
+active_user_ids = [user['id'] for user in users if user['status'] == 'active']
+```
+This filters millions of user records to extract only active users in a single, optimized operation."""
+        },
+        {
+            "question": "How do you handle exceptions in data pipelines?",
+            "answer": """📚 **Definition:**
+Exception handling in Python uses try/except blocks to gracefully manage runtime errors and prevent pipeline failures.
+
+💡 **Use Case:**
+In data engineering, robust error handling ensures pipelines continue processing even when encountering corrupt data, network issues, or API failures.
+
+🚀 **Real-World Example:**
+In a data ingestion pipeline:
+```python
+try:
+    data = api_client.fetch_data()
+except APIException as e:
+    logger.error(f"API failed: {e}")
+    data = load_from_backup_source()
+```
+This prevents entire pipeline failure when APIs are down."""
+        }
+    ],
+    "SQL": [
+        {
+            "question": "What are window functions in SQL?",
+            "answer": """📚 **Definition:**
+Window functions perform calculations across a set of table rows related to the current row, without grouping the result set.
+
+💡 **Use Case:**
+In analytics and reporting, window functions calculate running totals, rankings, and moving averages without complex self-joins.
+
+🚀 **Real-World Example:**
+Calculating monthly sales rankings:
+```sql
+SELECT 
+    salesperson,
+    monthly_sales,
+    RANK() OVER (ORDER BY monthly_sales DESC) as sales_rank
+FROM sales_summary;
+```
+This ranks salespeople by performance efficiently."""
+        }
+    ],
+    "Database": [
+        {
+            "question": "What is database indexing?",
+            "answer": """📚 **Definition:**
+Database indexes are data structures that improve query performance by creating optimized access paths to table data.
+
+💡 **Use Case:**
+In data warehouses, proper indexing dramatically speeds up analytical queries and reduces resource consumption for frequent lookups.
+
+🚀 **Real-World Example:**
+Indexing a customer lookup table:
+```sql
+CREATE INDEX idx_customer_email ON customers(email);
+```
+This reduces customer lookup time from seconds to milliseconds in production systems."""
+        }
+    ],
+    "ETL": [
+        {
+            "question": "What is data partitioning in ETL?",
+            "answer": """📚 **Definition:**
+Data partitioning divides large datasets into smaller, manageable chunks based on specific criteria like date, region, or key ranges.
+
+💡 **Use Case:**
+In ETL pipelines, partitioning enables parallel processing, improves query performance, and simplifies data lifecycle management.
+
+🚀 **Real-World Example:**
+Partitioning daily transaction data:
+```
+/data/transactions/year=2024/month=01/day=15/
+/data/transactions/year=2024/month=01/day=16/
+```
+This allows processing specific date ranges without scanning entire datasets."""
+        }
+    ]
+}
+
+
+def select_few_shot_examples(topic: str, num_examples: int = 2) -> str:
+    """
+    Dynamically select few-shot examples for a given topic.
+    
+    Args:
+        topic: Topic to get examples for
+        num_examples: Number of examples to include
+        
+    Returns:
+        Formatted few-shot examples string
+    """
+    if topic not in FEWSHOT_EXAMPLES:
+        # Use Python examples as fallback
+        topic = "Python"
+    
+    examples = FEWSHOT_EXAMPLES[topic]
+    # Randomly select examples to avoid repetition
+    selected = random.sample(examples, min(num_examples, len(examples)))
+    
+    formatted_examples = []
+    for i, example in enumerate(selected, 1):
+        formatted_examples.append(f"**Example {i}:**")
+        formatted_examples.append(f"Question: \"{example['question']}\"")
+        formatted_examples.append(f"Answer:\n{example['answer']}")
+        formatted_examples.append("---")
+    
+    return "\n".join(formatted_examples)
+
+def format_chat_history(messages: list, max_messages: int = 6) -> str:
+    """
+    Format chat history for inclusion in prompts.
+    
+    Args:
+        messages: List of chat messages with 'role' and 'content'
+        max_messages: Maximum number of recent messages to include
+        
+    Returns:
+        Formatted chat history string
+    """
+    if not messages or len(messages) < 2:
+        return "This is the start of the conversation."
+    
+    # Get recent messages (excluding current one)
+    recent_messages = messages[-max_messages:]
+    
+    formatted_history = []
+    for msg in recent_messages:
+        role = "Human" if msg["role"] == "user" else "Assistant"
+        content = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
+        formatted_history.append(f"{role}: {content}")
+    
+    return "\n".join(formatted_history)
 
 class RAGRetriever:
     """Handles retrieval and generation for the chatbot"""
@@ -105,68 +255,69 @@ class RAGRetriever:
             
             formatted_parts.append(doc.page_content)
             formatted_parts.append("")
+            
         
-        return "\n".join(formatted_parts)
+        context = "\n".join(formatted_parts)
+        print(context)
+
+        return context
     
-    def create_topic_chain(self):
+    def create_topic_chain(self, chat_history: str = None, topic: str = None):
         """
         Create a chain for topic-based question answering with enhanced prompting.
         
+        Args:
+            chat_history: Previous conversation context
+            topic: Current topic for dynamic few-shot examples
+            
         Returns:
             LangChain LCEL chain for RAG
         """
-        # Enhanced prompt with: Persona, Few-Shot, Chain-of-Thought, and Smart Fallback
-        template = """You are a Senior Data Engineer conducting technical interview preparation. You have 10+ years of experience building production data pipelines and mentoring junior engineers.
+        # Get dynamic few-shot examples
+        few_shot_examples = select_few_shot_examples(topic or "Python", num_examples=1)
+        
+        # Enhanced prompt with: Persona, Dynamic Few-Shot, Conversation Memory, Chain-of-Thought
+        template = f"""You are a Senior Data Engineer conducting technical interview preparation. You have 10+ years of experience building production data pipelines and mentoring junior engineers.
 
-**Your Task:** Answer the candidate's question using the provided competency information when relevant, or your expert knowledge when the context doesn't contain the answer.
+**Conversation History:**
+{chat_history or "This is the start of the conversation."}
+
+**Your Task:** Answer the candidate's question using the conversation context, retrieved competency information when relevant, and your expert knowledge.
 
 **Retrieved Competency Information:**
-{context}
+{{context}}
 
-**Candidate's Question:** {question}
+**Candidate's Current Question:** {{question}}
 
-**Response Format - FOLLOW THIS EXAMPLE:**
-
-Example Question: "What are list comprehensions in Python?"
-Example Answer:
-
-📚 **Definition:**
-List comprehensions are a concise, Pythonic way to create lists by applying an expression to each item in an iterable, with optional filtering conditions.
-
-💡 **Use Case:**
-In ETL pipelines, list comprehensions efficiently transform and filter data in-memory before loading to databases. They're faster and more readable than traditional for-loops for data transformation tasks.
-
-🚀 **Real-World Example:**
-In a production pipeline processing user events:
-```python
-active_user_ids = [user['id'] for user in users if user['status'] == 'active']
-```
-This filters millions of user records to extract only active users in a single, optimized operation.
-
----
-
-**Now, answer the candidate's question above following the same structure.**
+**Response Format Examples:**
+{few_shot_examples}
 
 **Smart Response Guidelines:**
-1. **First, check if the Retrieved Competency Information is relevant to the question**
+1. **Consider Conversation Context:**
+   - Reference previous topics discussed when relevant
+   - Build upon earlier questions and concepts
+   - Maintain conversation continuity
+
+2. **Use Retrieved Information Wisely:**
    - If YES: Use the competency information as your primary source
-   - If NO or IRRELEVANT: Use your expert knowledge to answer the question
+   - If NO or IRRELEVANT: Use your expert knowledge confidently
 
-2. **For questions about data engineering topics (CDC, data warehousing, streaming, etc.):**
-   - Answer confidently using your training data
-   - Provide accurate, interview-relevant information
-   - Include data engineering context and real-world examples
+3. **For Scenario-Based Questions:**
+   - Create realistic data engineering scenarios
+   - Reference technologies and concepts discussed earlier
+   - Include progressive difficulty levels when appropriate
 
-3. **Format Requirements:**
+4. **Format Requirements:**
    - ALWAYS use the three-section format: Definition, Use Case, Real-World Example
    - Keep responses focused and interview-relevant
    - Include code examples when helpful
    - Do NOT mention that you are an AI
 
-4. **Quality Standards:**
+5. **Quality Standards:**
    - Ensure technical accuracy
    - Focus on data engineering applications
    - Provide practical, actionable information
+   - Reference conversation context when relevant
 
 **Your Answer:**"""
 
@@ -182,27 +333,47 @@ This filters millions of user records to extract only active users in a single, 
         
         return chain
     
-    def create_topic_specific_chain(self, topic: str):
+    def create_topic_specific_chain(self, topic: str, chat_history: str = None):
         """
         Create a chain for a specific topic with enhanced context and metadata filtering.
         
         Args:
             topic: Topic to focus on (Python, SQL, Database, ETL)
+            chat_history: Previous conversation context
             
         Returns:
             Specialized chain for the topic with optimized retrieval
         """
-        # Enhanced prompt with strict topic focus and guardrails
+        # Get dynamic few-shot examples for the specific topic
+        few_shot_examples = select_few_shot_examples(topic, num_examples=2)
+        
+        # Enhanced prompt with strict topic focus, conversation memory, and dynamic examples
         template = f"""You are a Senior Data Engineer and Technical Interviewer specializing in {topic} for data engineering roles.
+
+**Conversation History:**
+{chat_history or "This is the start of the conversation."}
 
 **Your Expertise:** You conduct interviews at top tech companies and mentor engineers on {topic} best practices.
 
 **Retrieved {topic} Competency Information (Metadata-Filtered):**
 {{context}}
 
-**Candidate's Request:** {{question}}
+**Candidate's Current Request:** {{question}}
+
+**Response Format Examples for {topic}:**
+{few_shot_examples}
 
 **Your Task - Think Step-by-Step:**
+
+0. **Consider Conversation Context:**
+   - What topics have been discussed previously?
+   - How can you build upon earlier concepts?
+   - Are there connections to previous questions?
+
+1. **Assess the Request:**
+   - Is the candidate asking for practice questions or specific concepts?
+   - Does the retrieved context contain relevant {topic} information?
+   - If context is insufficient, acknowledge and use your expertise
 
 1. **Assess the Request:**
    - Is the candidate asking for practice questions or specific concepts?
@@ -285,19 +456,26 @@ This filters millions of user records to extract only active users in a single, 
         
         return chain
     
-    def generate_practice_questions(self, topic: str) -> str:
+    def generate_practice_questions(self, topic: str, chat_history: str = None) -> str:
         """
         Generate practice interview questions for a specific topic with error handling.
         
         Args:
             topic: Topic to generate questions for
+            chat_history: Previous conversation context
             
         Returns:
             Generated practice questions and learning content
         """
+        print(f"Generating practice questions for {topic} with conversation context")
         try:
-            chain = self.create_topic_specific_chain(topic)
-            question = f"Generate interview practice questions and key competencies I should learn for {topic} in data engineering interviews. Include questions at different difficulty levels."
+            chain = self.create_topic_specific_chain(topic, chat_history)
+            
+            # Enhanced question based on conversation context
+            if chat_history and "scenario" in chat_history.lower():
+                question = f"Based on our previous discussion, generate scenario-based interview practice questions and key competencies for {topic} in data engineering interviews. Include realistic scenarios and questions at different difficulty levels."
+            else:
+                question = f"Generate interview practice questions and key competencies I should learn for {topic} in data engineering interviews. Include questions at different difficulty levels."
             
             # Invoke with error handling
             response = chain.invoke(question)
@@ -311,13 +489,14 @@ This filters millions of user records to extract only active users in a single, 
             print(f"Error generating practice questions for {topic}: {str(e)}")
             return f"I encountered an error generating {topic} practice questions. Please try again or select a different topic."
     
-    def answer_question(self, question: str, topic: str = None) -> str:
+    def answer_question(self, question: str, topic: str = None, chat_history: str = None) -> str:
         """
         Answer a user question with RAG and comprehensive error handling.
         
         Args:
             question: User's question
             topic: Optional topic to filter context (recommended for better accuracy)
+            chat_history: Previous conversation context
             
         Returns:
             Generated answer
@@ -328,9 +507,9 @@ This filters millions of user records to extract only active users in a single, 
         try:
             # Use topic-specific chain if topic provided (better metadata filtering)
             if topic:
-                chain = self.create_topic_specific_chain(topic)
+                chain = self.create_topic_specific_chain(topic, chat_history)
             else:
-                chain = self.create_topic_chain()
+                chain = self.create_topic_chain(chat_history, topic)
             
             # Invoke with retry logic (LangChain handles this internally)
             response = chain.invoke(question)
@@ -369,17 +548,17 @@ def create_rag_system(vectorstore: Chroma) -> RAGRetriever:
     return RAGRetriever(vectorstore)
 
 
-if __name__ == "__main__":
-    # Example usage
-    from src.ingestion_csv import initialize_vector_store
+# if __name__ == "__main__":
+#     # Example usage
+#     from src.ingestion_csv import initialize_vector_store
     
-    print("Initializing RAG system...")
-    vectorstore = initialize_vector_store()
-    rag = create_rag_system(vectorstore)
+#     print("Initializing RAG system...")
+#     vectorstore = initialize_vector_store()
+#     rag = create_rag_system(vectorstore)
     
-    # Test retrieval
-    print("\n" + "="*70)
-    print("Testing Python topic retrieval...")
-    print("="*70)
-    response = rag.generate_practice_questions("Python")
-    print(response)
+#     # Test retrieval
+#     print("\n" + "="*70)
+#     print("Testing Python topic retrieval...")
+#     print("="*70)
+#     response = rag.generate_practice_questions("Python")
+#     print(response)
