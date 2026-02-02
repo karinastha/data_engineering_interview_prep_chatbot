@@ -172,7 +172,7 @@ def load_existing_vector_store(persist_directory: str = "data/vector_db") -> Chr
         collection_name="de_interview_prep"
     )
     
-    print("✅ Vector store loaded successfully")
+    print(" Vector store loaded successfully")
     return vectorstore
 
 

@@ -13,7 +13,9 @@ AWS_ACCESS_KEY_ID = os.getenv("aws_access_key_id")
 AWS_SECRET_ACCESS_KEY = os.getenv("aws_secret_access_key")
 AWS_SESSION_TOKEN = os.getenv("aws_session_token")
 
-# Initialize Nova Lite LLM
+# LANGCHAIN_TRACING_V2 = "true"
+# LANGCHAIN_API_KEY = os.getenv("LANGSMITH_API_KEY")
+# Initialize Nova Lite 
 llm = ChatBedrock(
     model_id="amazon.nova-lite-v1:0",
     region_name=AWS_REGION,
