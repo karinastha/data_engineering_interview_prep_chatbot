@@ -12,6 +12,7 @@ Responsibilities:
 import logging
 from typing import Optional
 
+from langsmith import traceable
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
@@ -43,6 +44,7 @@ class RetrievalService:
         self.vectorstore = vectorstore
         self.config = rag_config or get_config().rag
     
+    @traceable(name="vector_retrieval")
     def retrieve(
         self,
         query: str,

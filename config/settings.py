@@ -84,13 +84,14 @@ class DataConfig:
     """Data source configuration."""
     raw_docs_directory: str = "data/raw_docs"
     
-    # CSV file to topic mapping
-    csv_files: dict = field(default_factory=lambda: {
-        "Python": "DE docs - Python.csv",
-        "SQL": "DE docs - SQL.csv",
-        "Database": "DE docs - Database.csv",
-        "ETL": "DE docs - ETL.csv"
-    })
+    # CSV file mapping is now defined in config/topics.py
+    # Use get_csv_file_mapping() to get the mapping
+    
+    @property
+    def csv_files(self) -> dict:
+        """Get CSV file mapping from topics config (single source of truth)."""
+        from config.topics import get_csv_file_mapping
+        return get_csv_file_mapping()
 
 
 @dataclass
@@ -163,5 +164,13 @@ def reset_config() -> None:
     _config = None
 
 
-# Available topics as a constant for easy access
-AVAILABLE_TOPICS = ["Python", "SQL", "Database", "ETL"]
+# Available topics - now defined in config/topics.py (single source of truth)
+# Import from there: from config.topics import get_topic_names, TOPICS
+
+def get_available_topics() -> list[str]:
+    """Get available topics from the centralized config."""
+    from config.topics import get_topic_names
+    return get_topic_names()
+
+# Backward compatibility alias
+AVAILABLE_TOPICS = property(lambda self: get_available_topics())

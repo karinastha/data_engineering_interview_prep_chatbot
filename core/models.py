@@ -10,16 +10,24 @@ from typing import Optional
 
 
 class Topic(Enum):
-    """Available interview preparation topics."""
+    """
+    Available interview preparation topics.
+    
+    NOTE: Topic definitions are managed in config/topics.py (single source of truth).
+    This enum provides a type-safe way to reference topics in code.
+    When adding new topics, update config/topics.py first.
+    """
     PYTHON = "Python"
     SQL = "SQL"
     DATABASE = "Database"
     ETL = "ETL"
+    # Add new topic enum values here when adding to config/topics.py
     
     @classmethod
     def from_string(cls, value: str) -> Optional["Topic"]:
         """
         Parse topic from string with fuzzy matching.
+        Uses centralized topic config for matching logic.
         
         Args:
             value: String to parse (case-insensitive)
@@ -27,36 +35,28 @@ class Topic(Enum):
         Returns:
             Topic enum value or None if no match
         """
-        value_lower = value.lower().strip()
+        if not value:
+            return None
+            
+        # Use centralized matching from topics.py
+        from config.topics import match_topic
+        matched_name = match_topic(value)
         
-        # Direct matches
-        topic_map = {
-            "python": cls.PYTHON,
-            "py": cls.PYTHON,
-            "sql": cls.SQL,
-            "query": cls.SQL,
-            "database": cls.DATABASE,
-            "db": cls.DATABASE,
-            "rdbms": cls.DATABASE,
-            "etl": cls.ETL,
-            "pipeline": cls.ETL,
-        }
-        
-        # Check exact match first
-        if value_lower in topic_map:
-            return topic_map[value_lower]
-        
-        # Check if any keyword is contained in the value
-        for keyword, topic in topic_map.items():
-            if keyword in value_lower:
-                return topic
+        if matched_name:
+            # Convert matched name to enum
+            try:
+                return cls(matched_name)
+            except ValueError:
+                # Topic exists in config but not in enum yet
+                return None
         
         return None
     
     @classmethod
     def list_all(cls) -> list[str]:
-        """Get list of all topic values."""
-        return [topic.value for topic in cls]
+        """Get list of all topic values from centralized config."""
+        from config.topics import get_topic_names
+        return get_topic_names()
 
 
 class ConversationStage(Enum):

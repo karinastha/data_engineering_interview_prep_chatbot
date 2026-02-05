@@ -14,6 +14,7 @@ Architecture:
 import logging
 from typing import Optional, List, Dict
 
+from langsmith import traceable
 from pydantic import BaseModel, Field
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
@@ -30,6 +31,13 @@ logger = logging.getLogger(__name__)
 # PREPROCESSING SCHEMA - Single LLM call for query transform + topic extraction
 # =============================================================================
 
+def _get_topic_description() -> str:
+    """Get dynamic topic list for Pydantic field description."""
+    from config.topics import get_topic_names
+    topics = get_topic_names()
+    return f"Detected topic for metadata filtering. Must be exactly one of: {', '.join([repr(t) for t in topics])}, or null if no specific topic."
+
+
 class PreprocessedQuery(BaseModel):
     """
     Combined query transformation and topic extraction.
@@ -43,8 +51,7 @@ class PreprocessedQuery(BaseModel):
     )
     topic: Optional[str] = Field(
         None,
-        description="Detected topic for metadata filtering. Must be exactly one of: "
-                    "'Python', 'SQL', 'Database', 'ETL', or null if no specific topic."
+        description=_get_topic_description()
     )
 
 
@@ -77,37 +84,51 @@ RESPONSE FORMATS:
 🔴 **Advanced Level:**
 - [1-2 system design or optimization questions]
 
+**For architecture/system design questions** (design, architecture, how does X work end-to-end):
+Consider including a Mermaid diagram to visualize the concept:
+```mermaid
+graph LR
+    A[Component] --> B[Component]
+```
+Use diagrams for data flows, ETL pipelines, system architectures, or process flows when it helps understanding.
+
 GUIDELINES:
 1. Use the provided knowledge base context when available
 2. Choose the appropriate format based on what the user is asking
 3. Be accurate and practical - focus on real interview scenarios
 4. If you don't know something, say so
+5. For architecture questions, include Mermaid diagrams when visualization helps
 5. For greetings, respond naturally and helpfully"""
 
-PREPROCESSING_PROMPT = """Analyze this user message and prepare it for document retrieval.
+
+def _get_preprocessing_prompt() -> str:
+    """
+    Build preprocessing prompt with dynamic topic definitions from config.
+    This ensures topic definitions stay in sync with config/topics.py.
+    """
+    from config.topics import get_topic_definitions_for_prompt, get_classification_rules_for_prompt, get_topic_names
+    
+    topic_list = ", ".join([f"'{t}'" for t in get_topic_names()])
+    
+    return f"""Analyze this user message and prepare it for document retrieval.
 
 TOPIC DEFINITIONS (our knowledge base structure):
-- Python: Core Python syntax, pandas, NumPy, APIs, data wrangling, PySpark basics, decorators, error handling
-- SQL: Query syntax, joins, window functions, CTEs, subqueries, GROUP BY, query optimization
-- Database: RDBMS design, ACID properties, transactions, indexing, normalization, schema design, migrations
-- ETL: Data pipelines, ETL/ELT patterns, data warehousing, OLAP, dimensional modeling, data lakes, lakehouses, Snowflake, Redshift, Airflow
+{get_topic_definitions_for_prompt()}
 
 CLASSIFICATION RULES:
-- "data warehouse", "data lake", "lakehouse", "OLAP", "star schema", "dimensional modeling" → ETL
-- "ACID", "transactions", "normalization", "RDBMS", "schema design" → Database  
-- "joins", "window functions", "GROUP BY", "CTE", "subquery" → SQL
-- "pandas", "list comprehensions", "decorators", "PySpark" → Python
+{get_classification_rules_for_prompt()}
 
 RECENT USER MESSAGES (most recent = most important):
-{history}
+{{history}}
 
-CURRENT MESSAGE: "{message}"
+CURRENT MESSAGE: "{{message}}"
 
 TRANSFORMATION RULES:
 1. The CURRENT MESSAGE is what the user wants NOW - focus on this
 2. Use previous messages ONLY to resolve references ("it", "that", "this", "more")
 3. Include the topic from context if the current message has references
 4. Keep the standalone query concise (under 20 words)
+5. topic must be exactly one of: {topic_list}, or null if no specific topic
 
 EXAMPLES:
 - History: ["list comprehensions", "what about dictionary comprehensions?"]
@@ -132,24 +153,33 @@ EXAMPLES:
 
 Now process the current message:"""
 
-QA_PROMPT_TEMPLATE = """KNOWLEDGE BASE CONTEXT:
+
+# Legacy constant for backward compatibility (now generated dynamically)
+PREPROCESSING_PROMPT = _get_preprocessing_prompt()
+
+QA_PROMPT_TEMPLATE = """<context>
 {context}
+</context>
 
-CONVERSATION HISTORY:
+<conversation_history>
 {history}
+</conversation_history>
 
-USER QUESTION: {question}
+<user_question>
+{question}
+</user_question>
 
 Instructions:
-- Answer based on the knowledge base context when relevant
+- Answer based on the <context> when relevant
 - If context doesn't cover the topic, use your general knowledge but mention it
 - Be concise and interview-focused
 - Include practical examples when helpful
 
 Your response:"""
 
-PRACTICE_QUESTIONS_PROMPT = """KNOWLEDGE BASE CONTEXT:
+PRACTICE_QUESTIONS_PROMPT = """<context>
 {context}
+</context>
 
 Generate interview practice content for {topic}.
 
@@ -257,6 +287,7 @@ class ChatService:
         
         return "\n".join(formatted)
     
+    @traceable(name="preprocess_query")
     def _preprocess_query(
         self,
         message: str,
@@ -296,6 +327,7 @@ class ChatService:
                 topic=None,
             )
     
+    @traceable(name="answer")
     def answer(
         self,
         message: str,
@@ -356,6 +388,78 @@ class ChatService:
                 content="I encountered an error. Please try again.",
                 error=str(e),
             )
+    
+    @traceable(name="answer_stream")
+    def answer_stream(
+        self,
+        message: str,
+        history: List[Dict],
+    ):
+        """
+        Streaming version of answer() - yields tokens as they're generated.
+        
+        Args:
+            message: User's current message
+            history: List of previous messages
+            
+        Yields:
+            str: Response tokens as they're generated
+            
+        Returns:
+            After iteration completes, can access full_response via the generator
+        """
+        from typing import Generator
+        
+        if not message or not message.strip():
+            yield "Please provide a question."
+            return
+        
+        try:
+            # Step 1: Preprocess (non-streaming, ~1s)
+            preprocessed = self._preprocess_query(message, history)
+            
+            # Convert topic string to Topic enum if present
+            topic = None
+            if preprocessed.topic:
+                topic = Topic.from_string(preprocessed.topic)
+            
+            # Step 2: Retrieve relevant documents (non-streaming)
+            results = self.retrieval.retrieve(
+                query=preprocessed.standalone_query,
+                topic=topic,
+            )
+            
+            # Step 3: Generate response with STREAMING (LLM call #2)
+            context = self.retrieval.format_context(results)
+            history_text = self._format_history_for_generation(history)
+            
+            chain = self._qa_prompt | self.llm | self._parser
+            
+            full_response = ""
+            for chunk in chain.stream({
+                "context": context,
+                "history": history_text,
+                "question": preprocessed.standalone_query,
+            }):
+                full_response += chunk
+                yield chunk
+            
+            # Store metadata for potential access after streaming
+            self._last_response = RAGResponse(
+                content=full_response,
+                sources=results,
+                topic=topic,
+            )
+            
+            logger.info(f"Streamed response: {len(full_response)} chars, topic={topic}")
+            
+        except Exception as e:
+            logger.exception("Error in answer_stream()")
+            yield "I encountered an error. Please try again."
+    
+    def get_last_response(self) -> Optional[RAGResponse]:
+        """Get the last RAGResponse from answer_stream() for metadata access."""
+        return getattr(self, '_last_response', None)
     
     def generate_practice_questions(
         self,

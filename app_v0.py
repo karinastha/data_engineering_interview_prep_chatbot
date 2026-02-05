@@ -10,7 +10,7 @@ Simplified version:
 import streamlit as st
 from typing import Optional
 
-from config.settings import AVAILABLE_TOPICS
+from config.topics import get_topic_names, get_topic_display_string, TOPICS
 from core.models import Topic
 from services.ingestion import IngestionService
 from services.retrieval import RetrievalService
@@ -110,8 +110,8 @@ def render_sidebar() -> None:
         st.markdown("---")
         
         st.markdown("### 🎯 Topics")
-        for topic in AVAILABLE_TOPICS:
-            st.markdown(f"📌 {topic}")
+        for topic in TOPICS:
+            st.markdown(f"{topic.display_name}")
         
         st.markdown("---")
         
@@ -135,14 +135,16 @@ def render_sidebar() -> None:
 
 def render_welcome() -> None:
     """Display welcome message."""
-    welcome = """👋 **Welcome! I'm here to help you prepare for Data Engineering interviews.**
+    topic_display = get_topic_display_string()
+    
+    welcome = f"""👋 **Welcome! I'm here to help you prepare for Data Engineering interviews.**
 
 I can help with:
 - ✅ Practice interview questions (Entry/Mid/Advanced levels)
 - ✅ Technical concepts with examples
 - ✅ Leapfrog competency-based preparation
 
-**Topics:** 🐍 Python | 💾 SQL | 🗄️ Database | 🔄 ETL
+**Topics:** {topic_display}
 
 **Just ask me anything!** For example:
 - "Give me Python interview questions"
@@ -152,36 +154,102 @@ I can help with:
     add_message("assistant", welcome)
 
 
+def render_content_with_mermaid(content: str) -> None:
+    """
+    Render content that may contain mermaid diagrams.
+    
+    Splits content into markdown and mermaid parts,
+    rendering each appropriately.
+    """
+    from utils.text_processing import split_content_with_mermaid
+    
+    parts = split_content_with_mermaid(content)
+    
+    for part in parts:
+        if part["type"] == "markdown":
+            st.markdown(part["content"])
+        elif part["type"] == "mermaid":
+            try:
+                import streamlit_mermaid as stmd
+                stmd.st_mermaid(part["content"])
+            except Exception as e:
+                # Fallback: show as code block if mermaid fails
+                st.code(part["content"], language="mermaid")
+
+
 def render_chat_messages() -> None:
-    """Render all chat messages."""
+    """Render all chat messages with mermaid support."""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            render_content_with_mermaid(message["content"])
 
 
 # =============================================================================
-# MESSAGE HANDLING - Simplified, no intent routing
+# MESSAGE HANDLING - With streaming support
 # =============================================================================
+
+def handle_message_streaming(user_input: str) -> None:
+    """
+    Process user input with streaming response.
+    
+    Flow:
+    1. Get conversation history
+    2. Call chat service streaming (preprocess → retrieve → stream generate)
+    3. Display tokens as they arrive (markdown only during stream)
+    4. Re-render with mermaid support after completion
+    """
+    from utils.text_processing import post_process_markdown
+    
+    chat_service = get_chat_service()
+    history = get_history()
+    
+    with st.chat_message("assistant"):
+        # Use placeholder for streaming
+        response_placeholder = st.empty()
+        full_response = ""
+        
+        for chunk in chat_service.answer_stream(
+            message=user_input,
+            history=history,
+        ):
+            full_response += chunk
+            # Show response with typing indicator (plain markdown during streaming)
+            response_placeholder.markdown(full_response + "▌")
+        
+        # Post-process markdown
+        final_response = post_process_markdown(full_response)
+        
+        # Clear placeholder and render with mermaid support
+        response_placeholder.empty()
+        render_content_with_mermaid(final_response)
+    
+    # Store the final processed response
+    add_message("assistant", final_response)
+
 
 def handle_message(user_input: str) -> None:
     """
-    Process user input through RAG pipeline.
+    Process user input through RAG pipeline (non-streaming fallback).
     
     Simple flow:
     1. Get conversation history
     2. Call chat service (preprocess → retrieve → generate)
     3. Display response
     """
+    from utils.text_processing import post_process_markdown
+    
     chat_service = get_chat_service()
     history = get_history()
     
     with st.spinner("🤔 Thinking..."):
         response = chat_service.answer(
             message=user_input,
-            history=history,  # Pass full conversation history
+            history=history,
         )
     
-    add_message("assistant", response.content)
+    # Post-process markdown for better rendering
+    processed_content = post_process_markdown(response.content)
+    add_message("assistant", processed_content)
 
 
 # =============================================================================
@@ -211,10 +279,10 @@ def main() -> None:
         with st.chat_message("user"):
             st.markdown(prompt)
         
-        # Process and respond
-        handle_message(prompt)
+        # Process and respond with streaming
+        handle_message_streaming(prompt)
         
-        # Refresh to show new messages
+        # Refresh to show new messages in history
         st.rerun()
 
 
