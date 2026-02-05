@@ -55,7 +55,7 @@ class RAGConfig:
     """RAG retrieval configuration settings."""
     # Retrieval parameters
     top_k: int = 4  # Number of documents to retrieve
-    similarity_threshold: float = 0.3  # Minimum similarity score (0-1)
+    similarity_threshold: float = 0.4  # Minimum similarity score (0-1), ~0.5 for L2 distance=1.0
     max_topic_docs: int = 6  # Max docs for topic-specific queries
     
     # Context formatting

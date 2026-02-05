@@ -50,78 +50,56 @@ class RetrievalService:
         top_k: Optional[int] = None,
     ) -> list[RetrievalResult]:
         """
-        Retrieve relevant documents for a query.
+        Retrieve relevant documents for a query with optional topic filtering.
+        
+        Unified retrieval method that handles both general and topic-specific searches.
+        This eliminates code duplication and makes the implementation more maintainable.
         
         Args:
             query: Search query
-            topic: Optional topic to filter by
+            topic: Optional topic to filter by (Python, SQL, Database, ETL)
             top_k: Number of results (uses config default if None)
             
         Returns:
             List of RetrievalResult objects sorted by relevance
+            
+        Examples:
+            # General search
+            results = retrieval.retrieve("What is data partitioning?")
+            
+            # Topic-filtered search
+            results = retrieval.retrieve("list comprehensions", topic=Topic.PYTHON)
         """
         k = top_k or self.config.top_k
-        
+        # todo
         try:
+            # Build search parameters based on whether topic is specified
+            search_params = {"k": k}
+            
+            # Enhance query with topic context if topic is specified
+            search_query = query
             if topic:
-                return self._retrieve_by_topic(query, topic, k)
-            else:
-                return self._retrieve_general(query, k)
+                search_query = f"Data engineering {topic.value}: {query}"
+                search_params["filter"] = {"topic": topic.value}
+            
+            # Execute unified similarity search
+            docs_with_scores = self.vectorstore.similarity_search_with_score(
+                query=search_query,
+                **search_params
+            )
+            
+            # Process and filter results
+            results = self._process_results(docs_with_scores)
+            
+            # Log warning if topic-specific search returns no results
+            if topic and not results:
+                logger.warning(f"No documents found for topic: {topic.value}")
+            
+            return results
                 
         except Exception as e:
-            logger.error(f"Retrieval error: {e}")
+            logger.error(f"Retrieval error: {e}", exc_info=True)
             return []
-    
-    def _retrieve_general(self, query: str, k: int) -> list[RetrievalResult]:
-        """
-        Perform general similarity search without topic filter.
-        
-        Args:
-            query: Search query
-            k: Number of results
-            
-        Returns:
-            List of RetrievalResult objects
-        """
-        docs_with_scores = self.vectorstore.similarity_search_with_score(
-            query=query,
-            k=k,
-        )
-        
-        return self._process_results(docs_with_scores)
-    
-    def _retrieve_by_topic(
-        self,
-        query: str,
-        topic: Topic,
-        k: int,
-    ) -> list[RetrievalResult]:
-        """
-        Retrieve documents filtered by topic.
-        
-        Args:
-            query: Search query
-            topic: Topic to filter by
-            k: Number of results
-            
-        Returns:
-            List of RetrievalResult objects
-        """
-        # Enhance query with topic context for better matching
-        enhanced_query = f"Data engineering {topic.value}: {query}"
-        
-        docs_with_scores = self.vectorstore.similarity_search_with_score(
-            query=enhanced_query,
-            k=k,
-            filter={"topic": topic.value},
-        )
-        
-        results = self._process_results(docs_with_scores)
-        
-        if not results:
-            logger.warning(f"No documents found for topic: {topic.value}")
-        
-        return results
     
     def _process_results(
         self,
@@ -130,20 +108,27 @@ class RetrievalService:
         """
         Process raw results into RetrievalResult objects.
         
-        Applies similarity threshold filtering.
+        Applies similarity threshold filtering and converts distance scores
+        to similarity scores.
+        
+        ChromaDB Distance Metrics:
+        - **Cosine Distance**: [0, 2] - Used for normalized embeddings (our case)
+          * 0 = identical vectors, 2 = opposite vectors
+          * Conversion: similarity = 1 - distance → [-1, 1], clamped to [0, 1]
+        - **L2/Euclidean**: [0, ∞) - Unbounded distance
+          * Conversion: similarity = 1 / (1 + distance)
         
         Args:
-            docs_with_scores: List of (Document, score) tuples
+            docs_with_scores: List of (Document, score) tuples from ChromaDB
             
         Returns:
-            Filtered and processed results
+            Filtered and processed results with normalized similarity scores
         """
         results = []
         
         for doc, score in docs_with_scores:
-            # Note: ChromaDB returns distance, lower is better
-            # Convert to similarity score (higher is better)
-            similarity = 1 - score if score <= 1 else 1 / (1 + score)
+            # Convert ChromaDB distance to similarity score (0-1, higher is better)
+            similarity = self._distance_to_similarity(score)
             
             result = RetrievalResult(
                 content=doc.page_content,
@@ -157,19 +142,40 @@ class RetrievalService:
             if result.is_relevant(self.config.similarity_threshold):
                 results.append(result)
         
-        # If nothing passes threshold, return top result anyway
-        if not results and docs_with_scores:
-            doc, score = docs_with_scores[0]
-            results.append(RetrievalResult(
-                content=doc.page_content,
-                score=1 - score if score <= 1 else 1 / (1 + score),
-                topic=doc.metadata.get("topic", ""),
-                subtopic=doc.metadata.get("subtopic", ""),
-                metadata=doc.metadata,
-            ))
-            logger.info("No results above threshold, returning top result")
+        # If nothing passes threshold, return empty list
+        # This allows the LLM to provide general guidance without being
+        # misled by irrelevant context
+        if not results:
+            logger.info(
+                f"No results above threshold ({self.config.similarity_threshold}). "
+                "LLM will respond without knowledge base context."
+            )
         
         return results
+    
+    def _distance_to_similarity(self, distance: float) -> float:
+        """
+        Convert ChromaDB cosine distance to similarity score.
+        
+        ChromaDB with cosine distance (hnsw:space = 'cosine'):
+        - Range: [0, 2] for normalized vectors
+        - 0 = identical vectors (similarity = 1)
+        - 1 = orthogonal vectors (similarity = 0)  
+        - 2 = opposite vectors (similarity = -1, rare)
+        
+        Conversion: similarity = 1 - distance
+        
+        Args:
+            distance: ChromaDB cosine distance score (lower is better)
+            
+        Returns:
+            Similarity score in [0, 1] range (higher is better)
+        """
+        # Cosine distance to similarity: subtract from 1
+        similarity = 1.0 - distance
+        
+        # Clamp to [0, 1] range
+        return max(0.0, min(1.0, similarity))
     
     def format_context(
         self,

@@ -121,7 +121,7 @@ class IngestionService:
         filename: str
     ) -> Optional[Document]:
         """
-        Convert a single CSV row to a Document.
+        Convert a single CSV row to a structured Document.
         
         Args:
             row: DataFrame row
@@ -198,14 +198,14 @@ class IngestionService:
         
         if desirable:
             parts.extend([
-                "Use Case (Intermediate):",
+                "Intermediate:",
                 desirable,
                 "",
             ])
         
         if advanced:
             parts.extend([
-                "Real-World Example (Advanced):",
+                "Advanced:",
                 advanced,
                 "",
             ])
@@ -215,6 +215,8 @@ class IngestionService:
     def create_vector_store(self, documents: list[Document]) -> Chroma:
         """
         Create and persist a new vector store from documents.
+        
+        Uses cosine distance for similarity search (optimal for normalized embeddings).
         
         Args:
             documents: List of documents to index
@@ -231,9 +233,10 @@ class IngestionService:
             embedding=self.embeddings,
             persist_directory=persist_dir,
             collection_name=self.vector_store_config.collection_name,
+            collection_metadata={"hnsw:space": "cosine"},  # Use cosine distance
         )
         
-        logger.info(f"Vector store created at {persist_dir}")
+        logger.info(f"Vector store created at {persist_dir} (using cosine distance)")
         return vectorstore
     
     def load_vector_store(self) -> Chroma:
