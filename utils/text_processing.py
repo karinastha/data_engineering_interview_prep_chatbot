@@ -47,9 +47,30 @@ def post_process_markdown(text: str) -> str:
     text = re.sub(r'([\-\*]\s[^\n]+)\n([^\-\*\d\n\s])', r'\1\n\n\2', text)
     text = re.sub(r'(\d+\.\s[^\n]+)\n([^\-\*\d\n\s])', r'\1\n\n\2', text)
     
-    # Ensure spacing around emoji headers (common in our responses)
-    # e.g., "🟢 **Basic Level:**" should have space before and after
-    text = re.sub(r'([^\n])\n([\U0001F300-\U0001F9FF])', r'\1\n\n\2', text)
+    # Ensure spacing around emoji headers/markers (common in our responses)
+    # Match common emojis used in responses: 📚💡🚀🟢🟡🔴 and any emoji
+    # Expanded Unicode ranges to cover all emoji categories
+    emoji_pattern = r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0001FA00-\U0001FAFF]'
+    
+    # FIRST: Handle inline emojis (same line) - insert newline before emoji
+    # This handles cases like "Question? 📚 Definition:" all on one line
+    # Match: non-newline, optional whitespace, emoji -> insert newline before emoji
+    text = re.sub(rf'([^\n]) +({emoji_pattern})', r'\1\n\n\2', text)
+    
+    # Then handle single newline before emoji -> double newline
+    text = re.sub(rf'([^\n])\n({emoji_pattern})', r'\1\n\n\2', text)
+    
+    # Ensure blank line AFTER emoji-prefixed lines (before the next emoji or text)
+    text = re.sub(rf'({emoji_pattern}[^\n]+)\n({emoji_pattern})', r'\1\n\n\2', text)
+    
+    # Ensure blank line before **Q:** or **Question** patterns (interview questions)
+    text = re.sub(r'([^\n])\n(\*?\*?Q[:\.])', r'\1\n\n\2', text)
+    
+    # Ensure blank line before numbered question patterns (1. Q: or 1. **Q:)
+    text = re.sub(r'([^\n])\n(\d+\.\s*\*?\*?Q[:\.])', r'\1\n\n\2', text)
+    
+    # Ensure blank line before bold section headers like **Definition:** or **Example:**
+    text = re.sub(r'([^\n])\n(\*\*[A-Z][a-z]+[:\*])', r'\1\n\n\2', text)
     
     # Clean up any triple+ newlines (normalize to double)
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -66,6 +87,7 @@ def fix_mermaid_syntax(mermaid_code: str) -> str:
     - Space before parentheses: `A (Label)` should be `A(Label)`
     - Missing quotes in labels with special chars
     - Invalid arrow syntax
+    - Cylinder shape spacing: `[( Database )]` should be `[(Database)]`
     
     Args:
         mermaid_code: Raw mermaid code from LLM
@@ -81,6 +103,28 @@ def fix_mermaid_syntax(mermaid_code: str) -> str:
     
     # Fix space before curly braces: `A {Label}` -> `A{Label}`
     mermaid_code = re.sub(r'(\w)\s+\{', r'\1{', mermaid_code)
+    
+    # Fix space after opening brackets: `[ Label]` -> `[Label]`
+    mermaid_code = re.sub(r'\[\s+', '[', mermaid_code)
+    mermaid_code = re.sub(r'\(\s+', '(', mermaid_code)
+    mermaid_code = re.sub(r'\{\s+', '{', mermaid_code)
+    
+    # Fix space before closing brackets: `[Label ]` -> `[Label]`
+    mermaid_code = re.sub(r'\s+\]', ']', mermaid_code)
+    mermaid_code = re.sub(r'\s+\)', ')', mermaid_code)
+    mermaid_code = re.sub(r'\s+\}', '}', mermaid_code)
+    
+    # CRITICAL: Replace parentheses INSIDE square brackets with dashes
+    # `[Label(stuff)]` breaks mermaid - parens are shape syntax
+    # Convert to `[Label - stuff]` or `[Label: stuff]`
+    def fix_parens_in_brackets(match):
+        content = match.group(1)
+        # Replace ( with " - " and ) with nothing
+        content = re.sub(r'\s*\(', ' - ', content)
+        content = re.sub(r'\)\s*', '', content)
+        return f'[{content}]'
+    
+    mermaid_code = re.sub(r'\[([^\]]*\([^\]]*\)[^\]]*)\]', fix_parens_in_brackets, mermaid_code)
     
     # Fix double spaces
     mermaid_code = re.sub(r'  +', ' ', mermaid_code)
