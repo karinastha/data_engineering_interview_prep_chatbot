@@ -284,9 +284,161 @@ class IngestionService:
             return self.load_vector_store()
         
         logger.info("Creating new vector store...")
+        
+        # Load CSV documents (competency-based content)
         documents = self.load_csv_documents()
+        
+        # Load markdown project documents
+        project_docs = self.load_project_documents()
+        documents.extend(project_docs)
         
         if not documents:
             raise ValueError("No documents found to index. Check CSV files in raw_docs/")
         
         return self.create_vector_store(documents)
+    
+    def load_project_documents(self) -> list[Document]:
+        """
+        Load project markdown files with section-based chunking.
+        
+        Each major section (## heading) becomes a document for better retrieval.
+        Also creates a summary document for project overview queries.
+        
+        Returns:
+            List of Document objects from project files
+        """
+        import re
+        
+        documents = []
+        projects_dir = self.project_root / self.data_config.projects_directory
+        
+        if not projects_dir.exists():
+            logger.warning(f"Projects directory not found: {projects_dir}")
+            return documents
+        
+        logger.info(f"Loading project files from {projects_dir}")
+        
+        # Project file definitions
+        project_files = {
+            "ETL_INSIGHTS.md": {
+                "project_type": "ETL",
+                "title": "ETL to Insights Assignment",
+                "description": "Build a complete ETL pipeline with Python, analytics with SQL, API development, and visualization",
+            },
+            "ELT_DBT.md": {
+                "project_type": "ELT", 
+                "title": "E-Commerce ELT Pipeline with dbt",
+                "description": "Production-grade ELT pipeline extracting from REST API, loading to PostgreSQL, transforming with dbt",
+            },
+        }
+        
+        # Create project overview document (retrieved when user asks "what projects are available")
+        overview_content = self._create_projects_overview(project_files)
+        documents.append(Document(
+            page_content=overview_content,
+            metadata={
+                "topic": "Projects",
+                "subtopic": "Overview",
+                "source": "project_overview",
+                "project_type": "all",
+            }
+        ))
+        
+        # Load each project file
+        for filename, meta in project_files.items():
+            file_path = projects_dir / filename
+            
+            if not file_path.exists():
+                logger.warning(f"Project file not found: {filename}")
+                continue
+            
+            try:
+                project_docs = self._process_markdown_file(file_path, meta)
+                documents.extend(project_docs)
+                logger.info(f"Loaded {len(project_docs)} chunks from {filename}")
+                
+            except Exception as e:
+                logger.error(f"Error loading {filename}: {e}")
+                continue
+        
+        logger.info(f"Total project documents loaded: {len(documents)}")
+        return documents
+    
+    def _create_projects_overview(self, project_files: dict) -> str:
+        """Create overview content for project listing queries."""
+        lines = [
+            "Topic: Projects",
+            "Subtopic: Available Projects Overview",
+            "",
+            "Real-World Data Engineering Projects:",
+            "",
+        ]
+        
+        for i, (filename, meta) in enumerate(project_files.items(), 1):
+            lines.extend([
+                f"{i}. **{meta['title']}** ({meta['project_type']})",
+                f"   {meta['description']}",
+                "",
+            ])
+        
+        lines.extend([
+            "Ask about a specific project type (ETL or ELT) to get full details.",
+        ])
+        
+        return "\n".join(lines)
+    
+    def _process_markdown_file(
+        self,
+        file_path: Path,
+        meta: dict,
+    ) -> list[Document]:
+        """
+        Process a markdown file into section-based chunks.
+        
+        Strategy:
+        - Split on ## headers (major sections)
+        - Each section becomes a document
+        - Preserve section context in content
+        
+        Args:
+            file_path: Path to markdown file
+            meta: Project metadata dict
+            
+        Returns:
+            List of Document objects
+        """
+        import re
+        
+        documents = []
+        content = file_path.read_text(encoding="utf-8")
+        
+        # Split on ## headers (keep the header with the content)
+        sections = re.split(r'\n(?=## )', content)
+        
+        for section in sections:
+            section = section.strip()
+            if not section or len(section) < 50:
+                continue
+            
+            # Extract section title
+            title_match = re.match(r'^##\s*(.+?)(?:\n|$)', section)
+            section_title = title_match.group(1).strip() if title_match else "Overview"
+            
+            # Clean section title (remove markdown formatting)
+            section_title = re.sub(r'\*\*|\*|`', '', section_title)
+            
+            # Create document with project context
+            doc_content = f"Topic: Projects\nProject: {meta['title']}\nProject Type: {meta['project_type']}\nSection: {section_title}\n\n{section}"
+            
+            documents.append(Document(
+                page_content=doc_content,
+                metadata={
+                    "topic": "Projects",
+                    "subtopic": section_title,
+                    "source": file_path.name,
+                    "project_type": meta["project_type"],
+                    "project_title": meta["title"],
+                }
+            ))
+        
+        return documents

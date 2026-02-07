@@ -21,6 +21,7 @@ class Topic(Enum):
     SQL = "SQL"
     DATABASE = "Database"
     ETL = "ETL"
+    PROJECTS = "Projects"
     # Add new topic enum values here when adding to config/topics.py
     
     @classmethod

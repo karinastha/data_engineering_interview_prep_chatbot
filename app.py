@@ -12,7 +12,7 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 from config.settings import AVAILABLE_TOPICS
-from core.models import Topic, MessageRole
+from core.models import Topic, MessageRole, ConversationState, ChatMessage
 from services.ingestion import IngestionService
 from services.retrieval import RetrievalService
 from services.chat import ChatService
@@ -185,6 +185,7 @@ class UserIntent(str, Enum):
     GENERATE_PRACTICE = "generate_practice"
     ASK_QUESTION = "ask_question"
     CHANGE_TOPIC = "change_topic"
+    SELECT_OPTION = "select_option"  # User selecting from presented choices
     UNKNOWN = "unknown"
 
 
@@ -200,10 +201,15 @@ class IntentAnalysis(BaseModel):
     )
     topic: Optional[str] = Field(
         None,
-        description="Detected topic: 'Python', 'SQL', 'Database', 'ETL', or None if not mentioned"
+        description="Detected topic: 'Python', 'SQL', 'Database', 'ETL', 'Projects', or None if not mentioned"
     )
     standalone_query: str = Field(
-        description="A standalone, context-aware rephrasing of the user's message suitable for retrieval"
+        description="A standalone, context-aware rephrasing of the user's message suitable for retrieval. "
+                    "MUST include full context from conversation when user is making a selection or follow-up"
+    )
+    selection_context: Optional[str] = Field(
+        None,
+        description="When user is selecting from options, describe what they selected (e.g., 'ELT project details')"
     )
     confidence: float = Field(
         ge=0.0, le=1.0,
@@ -230,10 +236,11 @@ def classify_intent(user_message: str, current_topic: Optional[str], recent_mess
     # Create a structured output LLM
     structured_llm = llm.with_structured_output(IntentAnalysis)
     
-    # Build conversation history context
+    # Build conversation history context - INCLUDE FULL CONTENT for proper context
+    # Use up to 500 chars per message to capture enough context for selections
     history_context = "\n".join([
-        f"{msg['role'].title()}: {msg['content'][:100]}..."
-        for msg in recent_messages[-3:]
+        f"{msg['role'].title()}: {msg['content'][:500]}" + ("..." if len(msg['content']) > 500 else "")
+        for msg in recent_messages[-4:]
     ]) if recent_messages else "No previous conversation"
     
     # Context-aware classification prompt
@@ -252,19 +259,28 @@ Intent Categories:
 - generate_practice: User wants practice questions, interview prep, or topic overview
 - ask_question: User has a specific technical question about a concept
 - change_topic: User wants to switch to a different topic or explore other areas
+- select_option: User is SELECTING from options/choices that were just presented by the assistant (IMPORTANT: use this when assistant gave choices and user picks one)
 - unknown: Intent unclear or off-topic
 
+CRITICAL RULES FOR select_option:
+- If the assistant just presented choices (like "ELT OR ETL", "option 1 or 2", etc.) and user responds with one of the options, this is select_option
+- The standalone_query MUST reference what they are selecting (e.g., "Show details for the ELT project" not just "What is ELT")
+- Set selection_context to describe what was selected
+
 Instructions:
-1. Determine the PRIMARY intent
-2. Extract any mentioned topic (Python, SQL, Database, ETL)
-3. Create a standalone query by rephrasing the message with full context
-4. Provide a confidence score
+1. Determine the PRIMARY intent - look for selection patterns first!
+2. Extract any mentioned topic (Python, SQL, Database, ETL, Projects)
+3. Create a standalone query by rephrasing with FULL context from conversation
+4. If user is making a selection, set selection_context
+5. Provide a confidence score
 
 Examples:
-- "Python" → intent=select_topic, topic=Python, standalone="Select Python topic"
+- "Python" (no prior context) → intent=select_topic, topic=Python, standalone="Select Python topic for interview practice"
 - "Give me practice questions" → intent=generate_practice, topic={current_topic}, standalone="Generate practice interview questions for {current_topic or 'data engineering'}"
-- "What are list comprehensions?" → intent=ask_question, topic={current_topic}, standalone="What are list comprehensions in Python and how are they used in data engineering?"
+- "What are list comprehensions?" → intent=ask_question, standalone="What are list comprehensions in Python and how are they used in data engineering?"
 - "Let's try SQL instead" → intent=change_topic, topic=SQL, standalone="Change topic to SQL"
+- (After assistant says "2 choices: ELT or ETL project") User: "elt" → intent=select_option, topic=Projects, standalone="Show me the ELT project details", selection_context="ELT project from the offered choices"
+- (After assistant offers options A or B) User: "A" or "first one" → intent=select_option, standalone="Provide details for option A that was offered"
 
 Respond with the structured analysis."""
 
@@ -277,6 +293,7 @@ Respond with the structured analysis."""
             intent=UserIntent.ASK_QUESTION,
             topic=current_topic,
             standalone_query=user_message,
+            selection_context=None,
             confidence=0.5
         )
 
@@ -316,6 +333,7 @@ def handle_message(user_input: str) -> None:
         UserIntent.GENERATE_PRACTICE: _handle_practice_request,
         UserIntent.ASK_QUESTION: _handle_question,
         UserIntent.CHANGE_TOPIC: _handle_topic_change,
+        UserIntent.SELECT_OPTION: _handle_selection,  # New: handle user selections from offered choices
         UserIntent.UNKNOWN: _handle_unknown,
     }
     
@@ -401,6 +419,55 @@ def _handle_unknown(intent: IntentAnalysis, chat_service: ChatService) -> None:
     """Handle unknown/unclear intent - try to answer as question."""
     # Graceful fallback - treat as question
     _handle_question(intent, chat_service)
+
+
+def _handle_selection(intent: IntentAnalysis, chat_service: ChatService) -> None:
+    """
+    Handle user selecting from options presented by the assistant.
+    
+    This is critical for maintaining conversation context when the bot
+    offers choices and the user picks one.
+    """
+    # Build conversation state for context
+    conversation = _build_conversation_state()
+    
+    # Determine topic - check for Projects or use detected/current topic
+    topic = None
+    if intent.topic:
+        topic = Topic.from_string(intent.topic)
+    if not topic and st.session_state.selected_topic:
+        topic = Topic.from_string(st.session_state.selected_topic)
+    
+    with st.spinner("Getting details for your selection..."):
+        # Use the context-aware standalone query which should reference the selection
+        response = chat_service.answer_question(
+            intent.standalone_query,
+            conversation=conversation,
+            topic=topic
+        )
+    
+    add_message("assistant", response.content)
+
+
+def _build_conversation_state() -> ConversationState:
+    """
+    Build a ConversationState object from Streamlit session messages.
+    
+    This bridges the gap between Streamlit's simple message storage
+    and the ChatService's ConversationState model.
+    """
+    state = ConversationState()
+    
+    # Set topic if selected
+    if st.session_state.selected_topic:
+        state.selected_topic = Topic.from_string(st.session_state.selected_topic)
+    
+    # Convert session messages to ChatMessages
+    for msg in st.session_state.messages:
+        role = MessageRole.USER if msg["role"] == "user" else MessageRole.ASSISTANT
+        state.add_message(role, msg["content"])
+    
+    return state
 
 
 def _handle_topic_selection(topic: Topic, chat_service: ChatService) -> None:

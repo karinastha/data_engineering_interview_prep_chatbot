@@ -85,8 +85,36 @@ Just ask me something like:
 - *"Give me Python interview questions"*
 - *"Explain SQL joins"*
 - *"What are ETL best practices?"*
+- *"Show me real-world projects"*
 
 What would you like to explore?
+
+**For project/assignment requests** (projects, assignments, real-world, hands-on, portfolio):
+When user asks about projects or assignments, present available options first:
+
+📁 **Real-World Data Engineering Projects**
+
+I have hands-on projects to help you build your portfolio:
+
+1. **ETL to Insights** - Build a complete ETL pipeline
+   - Python-based extraction and transformation
+   - SQL analytics with business KPIs
+   - REST API development
+   - Data visualization
+
+2. **ELT with dbt** - Production-grade ELT pipeline
+   - Extract from REST API
+   - Load to PostgreSQL
+   - Transform with dbt (dimensional modeling)
+   - Data quality testing
+
+Which project interests you? Just say **"ETL project"** or **"ELT project"** for full details.
+
+When user selects a specific project (ETL or ELT), provide comprehensive details from the context including:
+- Project requirements and expectations
+- Tech stack and tools
+- Database design approach
+- Key deliverables
 
 **For conceptual/explanatory questions** (what is, explain, how does, difference between):
 📚 **Definition:** [Clear, concise explanation of the concept]
@@ -167,20 +195,33 @@ TOPIC DEFINITIONS (our knowledge base structure):
 CLASSIFICATION RULES:
 {get_classification_rules_for_prompt()}
 
-RECENT USER MESSAGES (most recent = most important):
+CONVERSATION HISTORY (User and Assistant messages):
 {{history}}
 
 CURRENT MESSAGE: "{{message}}"
 
 TRANSFORMATION RULES:
-1. The CURRENT MESSAGE is what the user wants NOW - focus on this
-2. Use previous messages ONLY to resolve references ("it", "that", "this", "more")
-3. Include the topic from context if the current message has references
-4. Keep the standalone query concise (under 20 words)
+1. CRITICAL - SELECTION DETECTION: If the Assistant just offered choices (like "ELT or ETL project", "option 1 or 2") 
+   and the user's current message is picking one of those options, the standalone_query MUST describe what they selected
+   Example: Assistant offered "ETL or ELT project", User says "elt" → standalone_query: "Show details for the ELT project"
+   
+2. The CURRENT MESSAGE is what the user wants NOW - focus on this
+3. Use history to resolve references ("it", "that", "this", "more", "first one", "second")
+4. Keep the standalone query concise but complete (under 25 words)
 5. topic must be exactly one of: {topic_list}, or null if no specific topic
 
 EXAMPLES:
-- History: ["list comprehensions", "what about dictionary comprehensions?"]
+- History: [Assistant: "I have two projects: 1. ETL to Insights 2. ELT with dbt. Which interests you?"]
+  Current: "elt"
+  → standalone_query: "Show me the ELT with dbt project details"
+  → topic: "Projects"
+
+- History: [Assistant: "Would you like Python or SQL questions?"]
+  Current: "python"
+  → standalone_query: "Give me Python interview questions"
+  → topic: "Python"
+
+- History: [User: "list comprehensions", Assistant: "...explained...", User: "what about dictionary comprehensions?"]
   Current: "show me examples"
   → standalone_query: "Examples of dictionary comprehensions in Python"
   → topic: "Python"
@@ -188,7 +229,7 @@ EXAMPLES:
 - History: []
   Current: "data warehouse vs lakehouse"
   → standalone_query: "What is the difference between data warehouse and data lakehouse?"
-  → topic: "ETL"  (warehousing concepts are in ETL docs)
+  → topic: "ETL"
 
 - History: []
   Current: "explain ACID properties"
@@ -283,37 +324,36 @@ class ChatService:
             ("human", PRACTICE_QUESTIONS_PROMPT),
         ])
     
-    def _format_history_for_preprocessing(self, messages: List[Dict], max_messages: int = 5) -> str:
+    def _format_history_for_preprocessing(self, messages: List[Dict], max_messages: int = 6) -> str:
         """
         Format conversation history for preprocessing prompt.
         
-        Uses only USER messages to save tokens and reduce confusion.
-        Most recent messages are most important.
+        IMPORTANT: Includes BOTH user and assistant messages to properly handle:
+        - User selections from choices offered by assistant
+        - Follow-up questions that reference assistant responses
+        - Context from previous exchanges
+        
+        The last assistant message is especially important when user is making a selection.
         """
         if not messages:
             return "No previous messages."
         
-        # Extract only user messages
-        user_messages = [msg["content"] for msg in messages if msg["role"] == "user"]
+        # Take last N messages, including both roles
+        recent = messages[-max_messages:]
         
-        if not user_messages:
+        if not recent:
             return "No previous messages."
         
-        # Take last N user messages (most recent first for the prompt)
-        recent = user_messages[-max_messages:]
-        
-        # Format with recency indicator
+        # Format with role labels, increased truncation to capture choices
         formatted = []
-        for i, content in enumerate(reversed(recent)):
-            # Truncate long messages
-            content = content[:100] + "..." if len(content) > 100 else content
-            if i == 0:
-                formatted.append(f"[CURRENT - skip, shown separately]")
-            else:
-                formatted.append(f"{i}. \"{content}\"")
+        for i, msg in enumerate(recent):
+            role = "User" if msg["role"] == "user" else "Assistant"
+            content = msg["content"]
+            # Use 400 chars to capture offered choices/options
+            content = content[:400] + "..." if len(content) > 400 else content
+            formatted.append(f"{role}: {content}")
         
-        # Remove the current message marker, return just previous ones
-        return "\n".join(formatted[1:]) if len(formatted) > 1 else "No previous messages."
+        return "\n".join(formatted) if formatted else "No previous messages."
     
     def _format_history_for_generation(self, messages: List[Dict], max_messages: int = 6) -> str:
         """

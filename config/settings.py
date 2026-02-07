@@ -83,6 +83,7 @@ class VectorStoreConfig:
 class DataConfig:
     """Data source configuration."""
     raw_docs_directory: str = "data/raw_docs"
+    projects_directory: str = "data/real_world_projects"
     
     # CSV file mapping is now defined in config/topics.py
     # Use get_csv_file_mapping() to get the mapping
@@ -92,6 +93,14 @@ class DataConfig:
         """Get CSV file mapping from topics config (single source of truth)."""
         from config.topics import get_csv_file_mapping
         return get_csv_file_mapping()
+    
+    @property
+    def project_files(self) -> dict:
+        """Mapping of project type to markdown filename."""
+        return {
+            "ETL": "ETL_INSIGHTS.md",
+            "ELT": "ELT_DBT.md",
+        }
 
 
 @dataclass

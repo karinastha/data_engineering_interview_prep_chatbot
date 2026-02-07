@@ -93,6 +93,18 @@ TOPICS: List[TopicConfig] = [
         description="Data pipelines, ETL/ELT patterns, data warehousing, OLAP, dimensional modeling, data lakes, lakehouses",
         aliases=("pipeline", "warehouse", "warehousing", "data engineering"),
     ),
+    TopicConfig(
+        name="Projects",
+        display_name="📁 Real-World Projects",
+        csv_file="",  # Uses markdown files instead
+        keywords=(
+            "project", "assignment", "real world", "hands-on", "practical",
+            "portfolio", "case study", "implementation", "build", "create",
+            "exercise", "task", "challenge", "practice project"
+        ),
+        description="Real-world data engineering projects and assignments for hands-on practice",
+        aliases=("projects", "assignments", "hands-on", "portfolio"),
+    ),
     # -------------------------------------------------------------------------
     # NEW TOPICS - Add as CSV files become available
     # -------------------------------------------------------------------------
