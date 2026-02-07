@@ -67,6 +67,13 @@ Your knowledge covers:
 - Database design (RDBMS, ACID, indexing, normalization)
 - ETL/ELT pipelines (Airflow, data warehousing, dimensional modeling, data lakes)
 
+CITATION REQUIREMENTS:
+When answering based on provided knowledge base context, you MUST:
+1. Use [Source N] format for inline citations (e.g., "List comprehensions [Source 1] allow you to...")
+2. Number sources sequentially: [Source 1], [Source 2], etc.
+3. Each unique document gets its own source number
+4. Include a "📖 Sources Used" section at the end listing all referenced sources
+
 RESPONSE FORMATS:
 
 **For greetings** (hi, hello, hey, good morning, etc.):
@@ -88,6 +95,21 @@ Just ask me something like:
 - *"Show me real-world projects"*
 
 What would you like to explore?
+
+**For knowledge-based answers** (when context is provided):
+📚 **Answer:**
+[Your comprehensive answer with inline citations like "According to [Source 1], ACID properties..."]
+
+💡 **Key Points:**
+- [Bullet point 1 with citation [Source 1]]
+- [Bullet point 2 with citation [Source 2]]
+
+🚀 **Example:**
+[Code snippet or practical scenario if applicable]
+
+📖 **Sources Used:**
+[Source 1] [Topic] - [Subtopic]
+[Source 2] [Topic] - [Subtopic]
 
 **For project/assignment requests** (projects, assignments, real-world, hands-on, portfolio):
 When user asks about projects or assignments, present available options first:
@@ -195,33 +217,20 @@ TOPIC DEFINITIONS (our knowledge base structure):
 CLASSIFICATION RULES:
 {get_classification_rules_for_prompt()}
 
-CONVERSATION HISTORY (User and Assistant messages):
+RECENT USER MESSAGES (most recent = most important):
 {{history}}
 
 CURRENT MESSAGE: "{{message}}"
 
 TRANSFORMATION RULES:
-1. CRITICAL - SELECTION DETECTION: If the Assistant just offered choices (like "ELT or ETL project", "option 1 or 2") 
-   and the user's current message is picking one of those options, the standalone_query MUST describe what they selected
-   Example: Assistant offered "ETL or ELT project", User says "elt" → standalone_query: "Show details for the ELT project"
-   
-2. The CURRENT MESSAGE is what the user wants NOW - focus on this
-3. Use history to resolve references ("it", "that", "this", "more", "first one", "second")
-4. Keep the standalone query concise but complete (under 25 words)
+1. The CURRENT MESSAGE is what the user wants NOW - focus on this
+2. Use previous messages ONLY to resolve references ("it", "that", "this", "more")
+3. Include the topic from context if the current message has references
+4. Keep the standalone query concise (under 20 words)
 5. topic must be exactly one of: {topic_list}, or null if no specific topic
 
 EXAMPLES:
-- History: [Assistant: "I have two projects: 1. ETL to Insights 2. ELT with dbt. Which interests you?"]
-  Current: "elt"
-  → standalone_query: "Show me the ELT with dbt project details"
-  → topic: "Projects"
-
-- History: [Assistant: "Would you like Python or SQL questions?"]
-  Current: "python"
-  → standalone_query: "Give me Python interview questions"
-  → topic: "Python"
-
-- History: [User: "list comprehensions", Assistant: "...explained...", User: "what about dictionary comprehensions?"]
+- History: ["list comprehensions", "what about dictionary comprehensions?"]
   Current: "show me examples"
   → standalone_query: "Examples of dictionary comprehensions in Python"
   → topic: "Python"
@@ -229,7 +238,7 @@ EXAMPLES:
 - History: []
   Current: "data warehouse vs lakehouse"
   → standalone_query: "What is the difference between data warehouse and data lakehouse?"
-  → topic: "ETL"
+  → topic: "ETL"  (warehousing concepts are in ETL docs)
 
 - History: []
   Current: "explain ACID properties"
@@ -260,10 +269,12 @@ QA_PROMPT_TEMPLATE = """<context>
 </user_question>
 
 Instructions:
-- Answer based on the <context> when relevant
+- Answer based on the <context> when relevant, using [Source N] citations for each reference
+- Number each unique context document as [Source 1], [Source 2], etc.
 - If context doesn't cover the topic, use your general knowledge but mention it
 - Be concise and interview-focused
 - Include practical examples when helpful
+- End with a "📖 Sources Used:" section listing all referenced sources with their topics and subtopics
 
 Your response:"""
 

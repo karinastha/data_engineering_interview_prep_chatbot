@@ -52,6 +52,11 @@ def post_process_markdown(text: str) -> str:
     # Expanded Unicode ranges to cover all emoji categories
     emoji_pattern = r'[\U0001F300-\U0001F9FF\U00002600-\U000027BF\U0001FA00-\U0001FAFF]'
     
+    # CRITICAL: Handle bullets with emoji content (e.g., "- 🟢 Basic")
+    # Remove bullets before emoji lines - they create formatting issues
+    text = re.sub(rf'^[\-\*]\s+({emoji_pattern})', r'\1', text, flags=re.MULTILINE)
+    text = re.sub(rf'\n[\-\*]\s+({emoji_pattern})', rf'\n\n\1', text)
+    
     # FIRST: Handle inline emojis (same line) - insert newline before emoji
     # This handles cases like "Question? 📚 Definition:" all on one line
     # Match: non-newline, optional whitespace, emoji -> insert newline before emoji
@@ -62,6 +67,8 @@ def post_process_markdown(text: str) -> str:
     
     # Ensure blank line AFTER emoji-prefixed lines (before the next emoji or text)
     text = re.sub(rf'({emoji_pattern}[^\n]+)\n({emoji_pattern})', r'\1\n\n\2', text)
+    # Also ensure spacing when emoji line is followed by regular text
+    text = re.sub(rf'({emoji_pattern}[^\n]+)\n([^\n\s])', r'\1\n\n\2', text)
     
     # Ensure blank line before **Q:** or **Question** patterns (interview questions)
     text = re.sub(r'([^\n])\n(\*?\*?Q[:\.])', r'\1\n\n\2', text)

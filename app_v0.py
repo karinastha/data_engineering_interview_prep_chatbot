@@ -67,9 +67,12 @@ def _init_chat_service() -> None:
         st.stop()
 
 
-def add_message(role: str, content: str) -> None:
-    """Add a message to conversation history."""
-    st.session_state.messages.append({"role": role, "content": content})
+def add_message(role: str, content: str, sources: list = None) -> None:
+    """Add a message to conversation history with optional sources."""
+    message = {"role": role, "content": content}
+    if sources:
+        message["sources"] = sources
+    st.session_state.messages.append(message)
 
 
 def get_history() -> list:
@@ -159,15 +162,17 @@ def render_content_with_mermaid(content: str) -> None:
     Render content that may contain mermaid diagrams.
     
     Splits content into markdown and mermaid parts,
-    rendering each appropriately.
+    rendering each appropriately with proper formatting.
     """
-    from utils.text_processing import split_content_with_mermaid
+    from utils.text_processing import split_content_with_mermaid, post_process_markdown
     
     parts = split_content_with_mermaid(content)
     
     for part in parts:
         if part["type"] == "markdown":
-            st.markdown(part["content"])
+            # Apply post-processing to fix Streamlit markdown rendering
+            formatted_content = post_process_markdown(part["content"])
+            st.markdown(formatted_content)
         elif part["type"] == "mermaid":
             try:
                 import streamlit_mermaid as stmd
@@ -177,11 +182,50 @@ def render_content_with_mermaid(content: str) -> None:
                 st.code(part["content"], language="mermaid")
 
 
+def render_sources_used(sources: list) -> None:
+    """
+    Display retrieved vector database chunks as expandable sources.
+    Shows users exactly which documents were used to generate the answer.
+    """
+    if not sources:
+        return
+    
+    with st.expander(f"📖 **Sources Used** ({len(sources)} chunks from vector database)", expanded=False):
+        for i, source in enumerate(sources, 1):
+            with st.container():
+                # Create columns for source info
+                col1, col2 = st.columns([1, 4])
+                
+                with col1:
+                    # Source number and relevance score
+                    st.metric(
+                        label=f"Source {i}",
+                        value=f"{source.score:.0%}",
+                        help="Relevance score from vector similarity search"
+                    )
+                
+                with col2:
+                    # Source details
+                    st.write(f"**{source.topic}** - {source.subtopic}")
+                    st.caption(f"📄 {source.metadata.get('source', 'Unknown file')}")
+                    
+                    # Content preview
+                    if hasattr(source, 'content') and source.content:
+                        preview = source.content[:300] + "..." if len(source.content) > 300 else source.content
+                        st.code(preview, language=None)
+                
+                if i < len(sources):  # Add separator except for last item
+                    st.divider()
+
+
 def render_chat_messages() -> None:
     """Render all chat messages with mermaid support."""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             render_content_with_mermaid(message["content"])
+            # Display sources if available (stored in metadata)
+            if message.get("sources"):
+                render_sources_used(message["sources"])
 
 
 # =============================================================================
@@ -196,7 +240,7 @@ def handle_message_streaming(user_input: str) -> None:
     1. Get conversation history
     2. Call chat service streaming (preprocess → retrieve → stream generate)
     3. Display tokens as they arrive (markdown only during stream)
-    4. Re-render with mermaid support after completion
+    4. Re-render with mermaid support and show sources after completion
     """
     from utils.text_processing import post_process_markdown
     
@@ -213,18 +257,23 @@ def handle_message_streaming(user_input: str) -> None:
             history=history,
         ):
             full_response += chunk
-            # Show response with typing indicator (plain markdown during streaming)
-            response_placeholder.markdown(full_response + "▌")
-        
-        # Post-process markdown
-        final_response = post_process_markdown(full_response)
+            # Show response with typing indicator (with post-processing for proper formatting)
+            response_placeholder.markdown(post_process_markdown(full_response) + "▌")
         
         # Clear placeholder and render with mermaid support
+        # render_content_with_mermaid will apply post_process_markdown internally
         response_placeholder.empty()
-        render_content_with_mermaid(final_response)
+        render_content_with_mermaid(full_response)
+        
+        # Get sources from the completed response
+        rag_response = chat_service.get_last_response()
+        if rag_response and rag_response.sources:
+            render_sources_used(rag_response.sources)
     
-    # Store the final processed response
-    add_message("assistant", final_response)
+    # Store the RAW response (without post-processing) so it can be properly formatted on re-render
+    rag_response = chat_service.get_last_response()
+    sources = rag_response.sources if rag_response else None
+    add_message("assistant", full_response, sources)
 
 
 def handle_message(user_input: str) -> None:
@@ -234,10 +283,8 @@ def handle_message(user_input: str) -> None:
     Simple flow:
     1. Get conversation history
     2. Call chat service (preprocess → retrieve → generate)
-    3. Display response
+    3. Display response with sources
     """
-    from utils.text_processing import post_process_markdown
-    
     chat_service = get_chat_service()
     history = get_history()
     
@@ -247,9 +294,15 @@ def handle_message(user_input: str) -> None:
             history=history,
         )
     
-    # Post-process markdown for better rendering
-    processed_content = post_process_markdown(response.content)
-    add_message("assistant", processed_content)
+    # Display response with sources
+    # render_content_with_mermaid will apply post_process_markdown internally
+    with st.chat_message("assistant"):
+        render_content_with_mermaid(response.content)
+        if response.sources:
+            render_sources_used(response.sources)
+    
+    # Store RAW content (without post-processing) for proper re-rendering from history
+    add_message("assistant", response.content, response.sources)
 
 
 # =============================================================================
