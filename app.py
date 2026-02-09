@@ -1,18 +1,17 @@
 """
-Data Engineering Interview Prep Chatbot - Streamlit Application
-A conversational chatbot using RAG for interview preparation.
+Data Engineering Interview Prep Chatbot - Streamlit Application V0
 
-This is a thin UI layer - all business logic is in services.
-Uses LLM-driven intent routing instead of hard-coded rules.
+Simplified version:
+- No intent classification
+- Single RAG flow for all messages  
+- Proper conversation history support
 """
 
 import streamlit as st
 from typing import Optional
-from enum import Enum
-from pydantic import BaseModel, Field
 
-from config.settings import AVAILABLE_TOPICS
-from core.models import Topic, MessageRole, ConversationState, ChatMessage
+from config.topics import get_topic_names, get_topic_display_string, TOPICS
+from schemas import Topic
 from services.ingestion import IngestionService
 from services.retrieval import RetrievalService
 from services.chat import ChatService
@@ -40,9 +39,6 @@ def init_session_state() -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
     
-    if "selected_topic" not in st.session_state:
-        st.session_state.selected_topic = None
-    
     if "chat_service" not in st.session_state:
         _init_chat_service()
 
@@ -50,7 +46,7 @@ def init_session_state() -> None:
 def _init_chat_service() -> None:
     """Initialize the chat service with dependencies."""
     try:
-        with st.spinner("🔄Initializing AI system..."):
+        with st.spinner("🔄 Initializing AI system..."):
             # Initialize components
             embeddings = get_embeddings()
             llm = get_llm()
@@ -71,9 +67,17 @@ def _init_chat_service() -> None:
         st.stop()
 
 
-def add_message(role: str, content: str) -> None:
-    """Add a message to conversation history."""
-    st.session_state.messages.append({"role": role, "content": content})
+def add_message(role: str, content: str, sources: list = None) -> None:
+    """Add a message to conversation history with optional sources."""
+    message = {"role": role, "content": content}
+    if sources:
+        message["sources"] = sources
+    st.session_state.messages.append(message)
+
+
+def get_history() -> list:
+    """Get conversation history for chat service."""
+    return st.session_state.messages
 
 
 def get_chat_service() -> ChatService:
@@ -102,394 +106,203 @@ def render_sidebar() -> None:
         st.markdown("""
         Prepare for Data Engineering interviews with:
         - Practice questions at all levels
-        - Key competencies with examples
+        - Leapfrog competency framework
         - Context-aware responses
         """)
         
         st.markdown("---")
         
         st.markdown("### 🎯 Topics")
-        for topic in AVAILABLE_TOPICS:
-            if st.session_state.selected_topic == topic:
-                st.markdown(f"✅ **{topic}** (Current)")
-            else:
-                st.markdown(f"📌 {topic}")
+        for topic in TOPICS:
+            st.markdown(f"{topic.display_name}")
         
         st.markdown("---")
         
-        st.markdown("### 💡 Quick Tips")
+        st.markdown("### 💡 Example Questions")
         st.markdown("""
-        - Type a topic name to start
-        - Ask specific questions
-        - Say "more topics" to switch
+        - "Give me Python interview questions"
+        - "Explain SQL joins with examples"
+        - "What are ETL best practices?"
+        - "More scenario-based questions"
         """)
         
         st.markdown("---")
         
         if st.button("🔄 Reset Conversation", use_container_width=True):
             st.session_state.messages = []
-            st.session_state.selected_topic = None
             st.rerun()
         
         st.markdown("---")
-        if st.session_state.selected_topic:
-            st.caption(f"📍 Current Topic: {st.session_state.selected_topic}")
-        else:
-            st.caption("📍 No topic selected")
+        st.caption(f"💬 Messages: {len(st.session_state.messages)}")
 
 
 def render_welcome() -> None:
     """Display welcome message."""
-    welcome = """👋 **Welcome! I'm here to help you prepare for Data Engineering interviews.**
+    topic_display = get_topic_display_string()
+    
+    welcome = f"""👋 **Welcome! I'm here to help you prepare for Data Engineering interviews.**
 
-I can provide:
-- ✅ Practice interview questions (Entry/Mid/Advanced)
-- ✅ Key competencies with definitions and examples
-- ✅ Context-aware answers to your questions
+I can help with:
+- ✅ Practice interview questions (Entry/Mid/Advanced levels)
+- ✅ Technical concepts with examples
+- ✅ Leapfrog competency-based preparation
 
-**Available Topics:** 🐍 Python | 💾 SQL | 🗄️ Database | 🔄 ETL DataWarehouse
+**Topics:** {topic_display}
 
-**To start, just type a topic name** (e.g., "Python") **or ask a question!**
+**Just ask me anything!** For example:
+- "Give me Python interview questions"
+- "Explain window functions in SQL"
+- "What should I know about database indexing?"
 """
     add_message("assistant", welcome)
 
 
-def render_topic_prompt() -> None:
-    """Prompt user to select a topic."""
-    prompt = """**Which topic would you like to practice?**
+def render_content_with_mermaid(content: str) -> None:
+    """
+    Render content that may contain mermaid diagrams.
+    
+    Splits content into markdown and mermaid parts,
+    rendering each appropriately with proper formatting.
+    """
+    from utils.text_processing import split_content_with_mermaid, post_process_markdown
+    
+    parts = split_content_with_mermaid(content)
+    
+    for part in parts:
+        if part["type"] == "markdown":
+            # Apply post-processing to fix Streamlit markdown rendering
+            formatted_content = post_process_markdown(part["content"])
+            st.markdown(formatted_content)
+        elif part["type"] == "mermaid":
+            try:
+                import streamlit_mermaid as stmd
+                stmd.st_mermaid(part["content"])
+            except Exception as e:
+                # Fallback: show as code block if mermaid fails
+                st.code(part["content"], language="mermaid")
 
-Select by typing the name:
-- 🐍 **Python** - Data engineering with Python
-- 💾 **SQL** - Queries and database operations  
-- 🗄️ **Database** - Design and optimization
-- 🔄 **ETL** - Pipelines and transformations
-"""
-    add_message("assistant", prompt)
+
+def render_sources_used(sources: list) -> None:
+    """
+    Display retrieved vector database chunks as expandable sources.
+    Shows users exactly which documents were used to generate the answer.
+    """
+    if not sources:
+        return
+    
+    with st.expander(f"📖 **Sources Used** ({len(sources)} chunks from vector database)", expanded=False):
+        for i, source in enumerate(sources, 1):
+            with st.container():
+                # Create columns for source info
+                col1, col2 = st.columns([1, 4])
+                
+                with col1:
+                    # Source number and relevance score
+                    st.metric(
+                        label=f"Source {i}",
+                        value=f"{source.score:.0%}",
+                        help="Relevance score from vector similarity search"
+                    )
+                
+                with col2:
+                    # Source details
+                    st.write(f"**{source.topic}** - {source.subtopic}")
+                    st.caption(f"📄 {source.metadata.get('source', 'Unknown file')}")
+                    
+                    # Content preview
+                    if hasattr(source, 'content') and source.content:
+                        preview = source.content[:300] + "..." if len(source.content) > 300 else source.content
+                        st.code(preview, language=None)
+                
+                if i < len(sources):  # Add separator except for last item
+                    st.divider()
 
 
 def render_chat_messages() -> None:
-    """Render all chat messages."""
+    """Render all chat messages with mermaid support."""
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            render_content_with_mermaid(message["content"])
+            # Display sources if available (stored in metadata)
+            if message.get("sources"):
+                render_sources_used(message["sources"])
 
 
 # =============================================================================
-# INTENT ROUTING - LLM-Driven (No Hard-coded Rules)
+# MESSAGE HANDLING - With streaming support
 # =============================================================================
 
-class UserIntent(str, Enum):
-    """Possible user intents - extensible without code changes."""
-    GREETING = "greeting"
-    SELECT_TOPIC = "select_topic"
-    GENERATE_PRACTICE = "generate_practice"
-    ASK_QUESTION = "ask_question"
-    CHANGE_TOPIC = "change_topic"
-    SELECT_OPTION = "select_option"  # User selecting from presented choices
-    UNKNOWN = "unknown"
-
-
-class IntentAnalysis(BaseModel):
+def handle_message_streaming(user_input: str) -> None:
     """
-    Structured output from LLM intent classifier.
+    Process user input with streaming response.
     
-    This replaces all hard-coded rule functions like _wants_practice(),
-    _wants_topic_change(), etc.
+    Flow:
+    1. Get conversation history
+    2. Call chat service streaming (preprocess → retrieve → stream generate)
+    3. Display tokens as they arrive (markdown only during stream)
+    4. Re-render with mermaid support and show sources after completion
     """
-    intent: UserIntent = Field(
-        description="The primary intent/action the user wants to perform"
-    )
-    topic: Optional[str] = Field(
-        None,
-        description="Detected topic: 'Python', 'SQL', 'Database', 'ETL', 'Projects', or None if not mentioned"
-    )
-    standalone_query: str = Field(
-        description="A standalone, context-aware rephrasing of the user's message suitable for retrieval. "
-                    "MUST include full context from conversation when user is making a selection or follow-up"
-    )
-    selection_context: Optional[str] = Field(
-        None,
-        description="When user is selecting from options, describe what they selected (e.g., 'ELT project details')"
-    )
-    confidence: float = Field(
-        ge=0.0, le=1.0,
-        description="Confidence score for the intent classification (0-1)"
-    )
-
-
-def classify_intent(user_message: str, current_topic: Optional[str], recent_messages: list) -> IntentAnalysis:
-    """
-    Use LLM to classify user intent and extract entities.
+    from utils.text_processing import post_process_markdown
     
-    This is the SINGLE decision point that replaces all rule-based branching.
+    chat_service = get_chat_service()
+    history = get_history()
     
-    Args:
-        user_message: The user's input
-        current_topic: Currently selected topic (if any)
-        recent_messages: Recent conversation history for context
+    with st.chat_message("assistant"):
+        # Use placeholder for streaming
+        response_placeholder = st.empty()
+        full_response = ""
         
-    Returns:
-        IntentAnalysis with intent, topic, and standalone query
-    """
-    llm = get_llm()
+        for chunk in chat_service.answer_stream(
+            message=user_input,
+            history=history,
+        ):
+            full_response += chunk
+            # Show response with typing indicator (with post-processing for proper formatting)
+            response_placeholder.markdown(post_process_markdown(full_response) + "▌")
+        
+        # Clear placeholder and render with mermaid support
+        # render_content_with_mermaid will apply post_process_markdown internally
+        response_placeholder.empty()
+        render_content_with_mermaid(full_response)
+        
+        # Get sources from the completed response
+        rag_response = chat_service.get_last_response()
+        if rag_response and rag_response.sources:
+            render_sources_used(rag_response.sources)
     
-    # Create a structured output LLM
-    structured_llm = llm.with_structured_output(IntentAnalysis)
-    
-    # Build conversation history context - INCLUDE FULL CONTENT for proper context
-    # Use up to 500 chars per message to capture enough context for selections
-    history_context = "\n".join([
-        f"{msg['role'].title()}: {msg['content'][:500]}" + ("..." if len(msg['content']) > 500 else "")
-        for msg in recent_messages[-4:]
-    ]) if recent_messages else "No previous conversation"
-    
-    # Context-aware classification prompt
-    classification_prompt = f"""Analyze this user message and determine their intent in a Data Engineering interview prep chatbot.
-
-Current Context:
-- Selected Topic: {current_topic or 'None selected'}
-- Recent Conversation:
-{history_context}
-
-User Message: "{user_message}"
-
-Intent Categories:
-- greeting: Initial hello, general inquiry, or casual conversation starter
-- select_topic: User wants to choose or learn about a specific topic (Python, SQL, Database, ETL)
-- generate_practice: User wants practice questions, interview prep, or topic overview
-- ask_question: User has a specific technical question about a concept
-- change_topic: User wants to switch to a different topic or explore other areas
-- select_option: User is SELECTING from options/choices that were just presented by the assistant (IMPORTANT: use this when assistant gave choices and user picks one)
-- unknown: Intent unclear or off-topic
-
-CRITICAL RULES FOR select_option:
-- If the assistant just presented choices (like "ELT OR ETL", "option 1 or 2", etc.) and user responds with one of the options, this is select_option
-- The standalone_query MUST reference what they are selecting (e.g., "Show details for the ELT project" not just "What is ELT")
-- Set selection_context to describe what was selected
-
-Instructions:
-1. Determine the PRIMARY intent - look for selection patterns first!
-2. Extract any mentioned topic (Python, SQL, Database, ETL, Projects)
-3. Create a standalone query by rephrasing with FULL context from conversation
-4. If user is making a selection, set selection_context
-5. Provide a confidence score
-
-Examples:
-- "Python" (no prior context) → intent=select_topic, topic=Python, standalone="Select Python topic for interview practice"
-- "Give me practice questions" → intent=generate_practice, topic={current_topic}, standalone="Generate practice interview questions for {current_topic or 'data engineering'}"
-- "What are list comprehensions?" → intent=ask_question, standalone="What are list comprehensions in Python and how are they used in data engineering?"
-- "Let's try SQL instead" → intent=change_topic, topic=SQL, standalone="Change topic to SQL"
-- (After assistant says "2 choices: ELT or ETL project") User: "elt" → intent=select_option, topic=Projects, standalone="Show me the ELT project details", selection_context="ELT project from the offered choices"
-- (After assistant offers options A or B) User: "A" or "first one" → intent=select_option, standalone="Provide details for option A that was offered"
-
-Respond with the structured analysis."""
-
-    try:
-        result = structured_llm.invoke(classification_prompt)
-        return result
-    except Exception as e:
-        # Fallback to safe default
-        return IntentAnalysis(
-            intent=UserIntent.ASK_QUESTION,
-            topic=current_topic,
-            standalone_query=user_message,
-            selection_context=None,
-            confidence=0.5
-        )
-
-
-def detect_topic(text: str) -> Optional[Topic]:
-    """Detect topic from user message (kept for backward compatibility)."""
-    return Topic.from_string(text)
+    # Store the RAW response (without post-processing) so it can be properly formatted on re-render
+    rag_response = chat_service.get_last_response()
+    sources = rag_response.sources if rag_response else None
+    add_message("assistant", full_response, sources)
 
 
 def handle_message(user_input: str) -> None:
     """
-    Process user input using LLM-driven intent classification.
+    Process user input through RAG pipeline (non-streaming fallback).
     
-    NO HARD-CODED RULES - All decisions made by LLM structured output.
-    This makes the system more maintainable, extensible, and robust.
-    
-    Args:
-        user_input: The user's message
+    Simple flow:
+    1. Get conversation history
+    2. Call chat service (preprocess → retrieve → generate)
+    3. Display response with sources
     """
     chat_service = get_chat_service()
+    history = get_history()
     
-    # Get recent conversation history for context
-    recent_messages = st.session_state.messages[-5:] if st.session_state.messages else []
-    
-    # LLM-driven intent classification (replaces all rule-based branching)
-    with st.spinner("🤔 Understanding your request..."):
-        intent_result = classify_intent(
-            user_input,
-            st.session_state.selected_topic,
-            recent_messages
+    with st.spinner("🤔 Thinking..."):
+        response = chat_service.answer(
+            message=user_input,
+            history=history,
         )
     
-    # Declarative intent-to-action mapping (extensible without code changes)
-    action_handlers = {
-        UserIntent.GREETING: _handle_greeting,
-        UserIntent.SELECT_TOPIC: _handle_topic_selection_from_intent,
-        UserIntent.GENERATE_PRACTICE: _handle_practice_request,
-        UserIntent.ASK_QUESTION: _handle_question,
-        UserIntent.CHANGE_TOPIC: _handle_topic_change,
-        UserIntent.SELECT_OPTION: _handle_selection,  # New: handle user selections from offered choices
-        UserIntent.UNKNOWN: _handle_unknown,
-    }
+    # Display response with sources
+    # render_content_with_mermaid will apply post_process_markdown internally
+    with st.chat_message("assistant"):
+        render_content_with_mermaid(response.content)
+        if response.sources:
+            render_sources_used(response.sources)
     
-    # Route to appropriate handler
-    handler = action_handlers.get(intent_result.intent, _handle_unknown)
-    handler(intent_result, chat_service)
-
-
-# =============================================================================
-# INTENT HANDLERS - Declarative action functions
-# =============================================================================
-
-def _handle_greeting(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """Handle greeting intent."""
-    add_message("assistant", 
-        "Hello! Type a **topic name** (Python, SQL, Database, ETL) to start practicing, "
-        "or ask any data engineering question!")
-
-
-def _handle_topic_selection_from_intent(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """Handle topic selection intent with LLM-extracted topic."""
-    if intent.topic:
-        topic = Topic.from_string(intent.topic)
-        if topic:
-            st.session_state.selected_topic = topic.value
-            _generate_practice(chat_service)
-            return
-    
-    # No valid topic detected - prompt user
-    render_topic_prompt()
-
-
-def _handle_practice_request(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """Handle practice question generation request."""
-    if st.session_state.selected_topic:
-        # Generate for current topic
-        _generate_practice(chat_service)
-    elif intent.topic:
-        # Topic mentioned in request - use it
-        topic = Topic.from_string(intent.topic)
-        if topic:
-            st.session_state.selected_topic = topic.value
-            _generate_practice(chat_service)
-        else:
-            render_topic_prompt()
-    else:
-        # Need topic selection
-        render_topic_prompt()
-
-
-def  _handle_question(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """Handle technical question using standalone query."""
-    topic = None
-    if st.session_state.selected_topic:
-        topic = Topic.from_string(st.session_state.selected_topic)
-    elif intent.topic:
-        # Use LLM-detected topic if available
-        topic = Topic.from_string(intent.topic)
-    
-    with st.spinner("Thinking..."):
-        # Use the LLM-generated standalone query for better retrieval
-        response = chat_service.answer_question(intent.standalone_query, topic=topic)
-    
-    add_message("assistant", response.content)
-
-
-def _handle_topic_change(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """Handle topic change request."""
-    if intent.topic:
-        topic = Topic.from_string(intent.topic)
-        if topic and topic.value != st.session_state.selected_topic:
-            # Switch to new topic
-            st.session_state.selected_topic = topic.value
-            _generate_practice(chat_service)
-            return
-    
-    # Prompt for topic selection
-    st.session_state.selected_topic = None
-    render_topic_prompt()
-
-
-def _handle_unknown(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """Handle unknown/unclear intent - try to answer as question."""
-    # Graceful fallback - treat as question
-    _handle_question(intent, chat_service)
-
-
-def _handle_selection(intent: IntentAnalysis, chat_service: ChatService) -> None:
-    """
-    Handle user selecting from options presented by the assistant.
-    
-    This is critical for maintaining conversation context when the bot
-    offers choices and the user picks one.
-    """
-    # Build conversation state for context
-    conversation = _build_conversation_state()
-    
-    # Determine topic - check for Projects or use detected/current topic
-    topic = None
-    if intent.topic:
-        topic = Topic.from_string(intent.topic)
-    if not topic and st.session_state.selected_topic:
-        topic = Topic.from_string(st.session_state.selected_topic)
-    
-    with st.spinner("Getting details for your selection..."):
-        # Use the context-aware standalone query which should reference the selection
-        response = chat_service.answer_question(
-            intent.standalone_query,
-            conversation=conversation,
-            topic=topic
-        )
-    
-    add_message("assistant", response.content)
-
-
-def _build_conversation_state() -> ConversationState:
-    """
-    Build a ConversationState object from Streamlit session messages.
-    
-    This bridges the gap between Streamlit's simple message storage
-    and the ChatService's ConversationState model.
-    """
-    state = ConversationState()
-    
-    # Set topic if selected
-    if st.session_state.selected_topic:
-        state.selected_topic = Topic.from_string(st.session_state.selected_topic)
-    
-    # Convert session messages to ChatMessages
-    for msg in st.session_state.messages:
-        role = MessageRole.USER if msg["role"] == "user" else MessageRole.ASSISTANT
-        state.add_message(role, msg["content"])
-    
-    return state
-
-
-def _handle_topic_selection(topic: Topic, chat_service: ChatService) -> None:
-    """Handle topic selection and generate practice content."""
-    st.session_state.selected_topic = topic.value
-    _generate_practice(chat_service)
-
-
-def _generate_practice(chat_service: ChatService) -> None:
-    """Generate practice questions for current topic."""
-    topic = Topic.from_string(st.session_state.selected_topic)
-    
-    with st.spinner(f"🔍 Generating {topic.value} practice content..."):
-        response = chat_service.generate_practice_questions(topic)
-    
-    if response.is_success:
-        add_message("assistant", response.content)
-        add_message("assistant", 
-            f"\n---\n💡 Ask me specific questions about {topic.value}, "
-            "or say **'more topics'** to explore other areas!")
-    else:
-        add_message("assistant", f"⚠️ {response.content}")
+    # Store RAW content (without post-processing) for proper re-rendering from history
+    add_message("assistant", response.content, response.sources)
 
 
 # =============================================================================
@@ -513,22 +326,16 @@ def main() -> None:
     render_chat_messages()
     
     # Chat input
-    if prompt := st.chat_input("Type your message..."):
+    if prompt := st.chat_input("Ask me anything about data engineering interviews..."):
         # Show user message
         add_message("user", prompt)
         with st.chat_message("user"):
             st.markdown(prompt)
-
-        # TODO (Karina):
-        # Process and respond using LLM-driven intent routing
-        # SOLVED: Replaced hard-coded rules with structured LLM output
-        # - Intent classification via structured output (Pydantic)
-        # - Query transformation for standalone queries
-        # - Declarative action handlers
-        # - Easy to extend with new intents
-        handle_message(prompt)
         
-        # Refresh to show new messages
+        # Process and respond with streaming
+        handle_message_streaming(prompt)
+        
+        # Refresh to show new messages in history
         st.rerun()
 
 

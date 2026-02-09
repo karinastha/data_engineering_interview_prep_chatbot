@@ -17,7 +17,7 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 
 from config.settings import get_config, RAGConfig
-from core.models import Topic, RetrievalResult
+from schemas import Topic, RetrievalResult
 
 logger = logging.getLogger(__name__)
 

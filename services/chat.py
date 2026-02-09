@@ -1,531 +1,601 @@
-# """
-# Chat Service - RAG-based Question Answering
-# Orchestrates retrieval and generation for conversational responses.
+"""
+Chat Service V0 - Simplified RAG-based Question Answering
 
-# Responsibilities:
-# - Query transformation with conversation history
-# - Build prompts with context and history
-# - Generate responses using LLM
-# - Handle errors gracefully
-# - Provide practice question generation
-# """
+Key Changes from Original:
+- Single preprocessing step (query transformation + topic extraction)
+- No intent classification - everything goes through RAG
+- Proper conversation history integration
+- 2 LLM calls max per user message
 
-# import logging
-# from typing import Optional
+Architecture:
+    User Message + History → Preprocess (LLM #1) → Retrieve → Generate (LLM #2)
+"""
 
-# from pydantic import BaseModel, Field
-# from langchain_core.language_models import BaseChatModel
-# from langchain_core.prompts import ChatPromptTemplate
-# from langchain_core.output_parsers import StrOutputParser
+import logging
+from typing import Optional, List, Dict
 
-# from config.settings import get_config, LLMConfig
-# from core.models import Topic, ConversationState, RAGResponse
-# from services.retrieval import RetrievalService
+from langsmith import traceable
+from pydantic import BaseModel, Field
+from langchain_core.language_models import BaseChatModel
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
-# logger = logging.getLogger(__name__)
+from config.settings import get_config, LLMConfig
+from schemas import Topic, RAGResponse
+from services.retrieval import RetrievalService
+
+logger = logging.getLogger(__name__)
 
 
-# # =============================================================================
-# # QUERY TRANSFORMATION SCHEMA
-# # =============================================================================
+# =============================================================================
+# PREPROCESSING SCHEMA - Single LLM call for query transform + topic extraction
+# =============================================================================
 
-# class TransformedQuery(BaseModel):
-#     """
-#     Structured output for query transformation.
+def _get_topic_description() -> str:
+    """Get dynamic topic list for Pydantic field description."""
+    from config.topics import get_topic_names
+    topics = get_topic_names()
+    return f"Detected topic for metadata filtering. Must be exactly one of: {', '.join([repr(t) for t in topics])}, or null if no specific topic."
+
+
+class PreprocessedQuery(BaseModel):
+    """
+    Combined query transformation and topic extraction.
     
-#     Converts conversational queries into standalone, context-aware queries
-#     for better document retrieval.
-#     """
-#     standalone_query: str = Field(
-#         description="Standalone query with full context from conversation history, "
-#                     "suitable for semantic search without additional context"
-#     )
-#     original_intent: str = Field(
-#         description="Brief description of what the user is actually asking about"
-#     )
-#     requires_history: bool = Field(
-#         description="Whether the query needed conversation history to be understood"
-#     )
+    This replaces the separate IntentAnalysis (app.py) and TransformedQuery (chat.py)
+    with a single, focused preprocessing step.
+    """
+    standalone_query: str = Field(
+        description="Rewritten query that is self-contained and doesn't need conversation "
+                    "history to understand. Resolve pronouns like 'it', 'that', 'this' using context."
+    )
+    topic: Optional[str] = Field(
+        None,
+        description=_get_topic_description()
+    )
 
 
-# # =============================================================================
-# # PROMPT TEMPLATES - Simplified and focused
-# # =============================================================================
+# =============================================================================
+# PROMPT TEMPLATES - Simplified and focused
+# =============================================================================
 
-# SYSTEM_PROMPT = """You are a Senior Data Engineering Interview Coach with 10+ years of experience preparing candidates for roles at FAANG and top tech companies.
+SYSTEM_PROMPT = """You are a Data Engineering Interview Coach helping candidates prepare for technical interviews at Leapfrog.
 
-# Your Expertise:
-# - Python for data engineering (pandas, PySpark, data pipelines)
-# - SQL and database design (PostgreSQL, optimization, indexing)
-# - ETL/ELT pipelines (Apache Airflow, data orchestration)
-# - Data warehousing and distributed systems
+Your knowledge covers:
+- Python for data engineering (pandas, PySpark, APIs, data pipelines)
+- SQL queries (joins, window functions, CTEs, optimization)
+- Database design (RDBMS, ACID, indexing, normalization)
+- ETL/ELT pipelines (Airflow, data warehousing, dimensional modeling, data lakes)
 
-# Core Principles:
-# 1. ACCURACY: Only state facts you are certain about
-# 2. GROUNDING: When knowledge base context is provided, use ONLY that information
-# 3. CLARITY: Explain concepts as if teaching a motivated junior engineer
-# 4. PRACTICALITY: Focus on real-world interview scenarios and applications
-# 5. HONESTY: If you don't know something, say so directly
+CITATION REQUIREMENTS:
+When answering based on provided knowledge base context, you MUST:
+1. Use [Source N] format for inline citations (e.g., "List comprehensions [Source 1] allow you to...")
+2. Number sources sequentially: [Source 1], [Source 2], etc.
+3. Each unique document gets its own source number
+4. Include a "📖 Sources Used" section at the end listing all referenced sources
 
-# Response Structure (when applicable):
-# - Definition: Clear, concise explanation
-# - Why It Matters: Data engineering context
-# - Example: Code snippet or real-world scenario
-# - Interview Tip: How to discuss this in an interview
+RESPONSE FORMATS:
 
-# Keep responses focused, accurate, and interview-ready."""
+**For greetings** (hi, hello, hey, good morning, etc.):
+Respond with a warm, conversational welcome. DO NOT list questions unprompted. Use this format:
 
-# QA_WITH_CONTEXT_TEMPLATE = """KNOWLEDGE BASE CONTEXT:
-# {context}
+👋 **Hello!** Ready to ace your Data Engineering interview at Leapfrog?
 
-# CONVERSATION HISTORY:
-# {history}
+I can help you practice with questions across **Leapfrog's competency levels**:
+- 🟢 **Basic** - Core concepts and definitions
+- 🟡 **Intermediate** - Applied scenarios and problem-solving
+- 🔴 **Advanced** - System design and optimization
 
-# CANDIDATE'S QUESTION: {question}
+**Topics I cover:** Python, SQL, Database Design, ETL & Data Warehousing
 
-# CRITICAL INSTRUCTIONS:
-# 1. Use ONLY information from the KNOWLEDGE BASE CONTEXT above
-# 2. Every factual claim MUST cite its source using [Source N]
-# 3. If the context doesn't fully answer the question, acknowledge the gap
-# 4. Do NOT introduce information from your general knowledge
-# 5. If multiple sources conflict, cite both and explain the difference
+Just ask me something like:
+- *"Give me Python interview questions"*
+- *"Explain SQL joins"*
+- *"What are ETL best practices?"*
+- *"Show me real-world projects"*
 
-# REASONING PROCESS:
-# - Step 1: Identify which sources contain relevant information
-# - Step 2: Extract key facts from those sources
-# - Step 3: Synthesize a clear, structured answer
-# - Step 4: Ensure every claim has a citation
+What would you like to explore?
 
-# FORMAT YOUR RESPONSE AS:
+**For knowledge-based answers** (when context is provided):
+📚 **Answer:**
+[Your comprehensive answer with inline citations like "According to [Source 1], ACID properties..."]
 
-# **Answer:**
-# [Your comprehensive answer with inline citations like "According to [Source 1], ACID properties..."]
+💡 **Key Points:**
+- [Bullet point 1 with citation [Source 1]]
+- [Bullet point 2 with citation [Source 2]]
 
-# **Key Points:**
-# - [Bullet point 1 with citation]
-# - [Bullet point 2 with citation]
+🚀 **Example:**
+[Code snippet or practical scenario if applicable]
 
-# **Example:**
-# [Code snippet or practical scenario if applicable]
+📖 **Sources Used:**
+[Source 1] [Topic] - [Subtopic]
+[Source 2] [Topic] - [Subtopic]
 
-# **Interview Tip:**
-# [How to effectively discuss this topic in an interview]
+**For project/assignment requests** (projects, assignments, real-world, hands-on, portfolio):
+When user asks about projects or assignments, present available options first:
 
-# Begin your response:"""
+📁 **Real-World Data Engineering Projects**
 
-# QA_WITHOUT_CONTEXT_TEMPLATE = """CONVERSATION HISTORY:
-# {history}
+I have hands-on projects to help you build your portfolio:
 
-# CANDIDATE'S QUESTION: {question}
+1. **ETL to Insights** - Build a complete ETL pipeline
+   - Python-based extraction and transformation
+   - SQL analytics with business KPIs
+   - REST API development
+   - Data visualization
 
-# SITUATION: This topic was not found in our curated data engineering interview prep knowledge base.
+2. **ELT with dbt** - Production-grade ELT pipeline
+   - Extract from REST API
+   - Load to PostgreSQL
+   - Transform with dbt (dimensional modeling)
+   - Data quality testing
 
-# YOUR TASK:
-# 1. First, assess if this question is relevant to data engineering interviews
-# 2. If YES and you have reliable general knowledge:
-#    - Provide a helpful answer
-#    - Clearly state: "This is general knowledge, not from our prep materials"
-#    - Focus on data engineering applications if applicable
-   
-# 3. If NO (out of scope):
-#    - Politely explain this isn't typically covered in data engineering interviews
-#    - Suggest refocusing on core topics: Python, SQL, Databases, ETL
-   
-# 4. If you're uncertain about the answer:
-#    - Say so directly: "I don't have reliable information about this"
-#    - Suggest the candidate research authoritative sources
+Which project interests you? Just say **"ETL project"** or **"ELT project"** for full details.
 
-# IMPORTANT: 
-# - Be honest about the source of information
-# - Don't speculate or provide uncertain information
-# - Keep the candidate focused on interview-relevant topics
+When user selects a specific project (ETL or ELT), provide comprehensive details from the context including:
+- Project requirements and expectations
+- Tech stack and tools
+- Database design approach
+- Key deliverables
 
-# Begin your response:"""
+**For conceptual/explanatory questions** (what is, explain, how does, difference between):
+📚 **Definition:** [Clear, concise explanation of the concept]
 
-# PRACTICE_TEMPLATE = """KNOWLEDGE BASE CONTENT:
-# {context}
+💡 **Use Case:** [When/why this is used in data engineering - practical context]
 
-# TOPIC: {topic}
+🚀 **Example:** [Code snippet or real-world scenario]
 
-# TASK: Generate comprehensive interview practice materials for {topic} in data engineering.
+**For practice question requests** (interview questions, practice, quiz me):
+🟢 **Basic Level:**
+- [2-3 foundational questions testing definitions and core concepts]
 
-# QUALITY REQUIREMENTS:
-# - Questions must be realistic and commonly asked in interviews
-# - Difficulty must progress from entry to advanced
-# - Each question should test a distinct competency from the knowledge base
-# - Provide brief answer guidance (not full answers)
+🟡 **Intermediate Level:**
+- [2-3 applied/scenario questions testing practical skills]
 
-# OUTPUT STRUCTURE:
+🔴 **Advanced Level:**
+- [1-2 system design or optimization questions]
 
-# **Entry-Level Questions** (2-3 questions)
-# Target: Candidates with 0-2 years experience
-# Focus: Definitions, basic syntax, fundamental concepts
+**For architecture/system design questions** (design, architecture, how does X work end-to-end):
+Include a Mermaid diagram to visualize the architecture. Follow these rules:
 
-# Q1: [Clear, specific question]
-#    Expected knowledge: [What the candidate should know]
-   
-# Q2: [Clear, specific question]
-#    Expected knowledge: [What the candidate should know]
+MERMAID DIAGRAM GUIDELINES:
+1. Use `graph TD` (top-down) for hierarchical flows and ETL pipelines
+2. Use `graph LR` (left-right) for sequential processes or timelines
+3. Use subgraphs to group related components logically
+4. Keep node IDs short (A, B, C or src, tfm, load)
+5. Put labels IN the brackets with NO space before: `A[Label]` not `A [Label]`
+6. NEVER use parentheses () inside labels - they break the parser!
+   - BAD: `A[External Systems(APIs, DBs)]` 
+   - GOOD: `A[External Systems - APIs, DBs]`
+7. Limit to 8-12 nodes max for clarity
+8. Use proper shapes:
+   - `[Rectangle]` for processes/components
+   - `[(Database)]` for databases (cylinder shape)
+   - `{{Diamond}}` for decisions
+   - `((Circle))` for events/triggers
 
-# **Mid-Level Questions** (2-3 questions)
-# Target: Candidates with 2-5 years experience
-# Focus: Practical application, trade-offs, problem-solving
-
-# Q1: [Scenario-based question]
-#    Expected approach: [How to tackle this]
-   
-# Q2: [Scenario-based question]
-#    Expected approach: [How to tackle this]
-
-# **Advanced Questions** (1-2 questions)
-# Target: Senior candidates (5+ years)
-# Focus: System design, optimization, architectural decisions
-
-# Q1: [Complex, open-ended question]
-#    Discussion points: [Key areas to cover]
-
-# **Core Competencies**
-# For each major competency from the knowledge base:
-
-# **Competency: [Name]**
-# - What it is: [Brief definition]
-# - Why it matters: [Data engineering context]
-# - Interview relevance: [When/how this comes up]
-# - Example: [Code or scenario]
-# - Common pitfalls: [What candidates get wrong]
-
-# Ensure all content is grounded in the provided knowledge base context.
-
-# Begin your response:"""
-
-# QUERY_TRANSFORMATION_TEMPLATE = """TASK: Transform a conversational query into a standalone search query.
-
-# CURRENT CONTEXT:
-# Topic: {topic}
-# Recent Conversation:
-# {history}
-
-# USER'S QUERY: "{question}"
-
-# TRANSFORMATION RULES:
-# 1. If query references previous context ("it", "that", "this", "also"):
-#    → Incorporate specific context from conversation history
-   
-# 2. If query is already standalone and clear:
-#    → Return as-is (minimal changes)
-   
-# 3. If query is vague or ambiguous:
-#    → Add topic context to disambiguate
-   
-# 4. If query is a greeting or off-topic:
-#    → Mark as non-transformable
-   
-# 5. Always include topic (Python/SQL/Database/ETL) when it adds clarity
-
-# EXAMPLES:
-
-# Example 1:
-# History: "List comprehensions in Python create lists using concise syntax..."
-# Query: "What about lambda functions?"
-# Transformed: "What are lambda functions in Python and how do they differ from regular functions?"
-
-# Example 2:
-# History: "Window functions in SQL operate on partitions..."
-# Query: "How does it work with PARTITION BY?"
-# Transformed: "How do SQL window functions work with PARTITION BY clause?"
-
-# Example 3:
-# History: [none]
-# Query: "What is ETL?"
-# Transformed: "What is ETL in data engineering?"
-
-# Example 4:
-# History: "Apache Airflow is used for workflow orchestration..."
-# Query: "Can you explain the syntax better?"
-# Transformed: "Explain Apache Airflow DAG syntax and structure"
-
-# Example 5:
-# Query: "Hello"
-# Transformed: [Mark as greeting, no transformation needed]
-
-# NOW TRANSFORM THE CURRENT QUERY:
-# Analyze the query, apply the rules, and provide the standalone version."""
-
-
-# class ChatService:
-#     """
-#     Service for handling RAG-based chat interactions.
+Example of a well-structured diagram:
+```mermaid
+graph TD
+    subgraph Sources
+        A1[API] 
+        A2[(MySQL DB)]
+        A3[CSV Files]
+    end
     
-#     Combines document retrieval with LLM generation for
-#     context-aware responses.
-#     """
+    A1 --> E[Extract]
+    A2 --> E
+    A3 --> E
     
-#     def __init__(
-#         self,
-#         llm: BaseChatModel,
-#         retrieval_service: RetrievalService,
-#         llm_config: Optional[LLMConfig] = None,
-#     ):
-#         """
-#         Initialize the chat service.
-        
-#         Args:
-#             llm: Language model instance
-#             retrieval_service: Document retrieval service
-#             llm_config: LLM configuration (uses default if None)
-#         """
-#         self.llm = llm
-#         self.retrieval = retrieval_service
-#         self.config = llm_config or get_config().llm
-        
-#         # Initialize prompt templates
-#         self._qa_prompt_with_context = ChatPromptTemplate.from_messages([
-#             ("system", SYSTEM_PROMPT),
-#             ("human", QA_WITH_CONTEXT_TEMPLATE),
-#         ])
-        
-#         self._qa_prompt_without_context = ChatPromptTemplate.from_messages([
-#             ("system", SYSTEM_PROMPT),
-#             ("human", QA_WITHOUT_CONTEXT_TEMPLATE),
-#         ])
-        
-#         self._practice_prompt = ChatPromptTemplate.from_messages([
-#             ("system", SYSTEM_PROMPT),
-#             ("human", PRACTICE_TEMPLATE),
-#         ])
-        
-#         # Output parser
-#         self._parser = StrOutputParser()
-    
-#     def _transform_query(
-#         self,
-#         question: str,
-#         conversation: Optional[ConversationState],
-#         topic: Optional[Topic]
-#     ) -> str:
-#         """
-#         Transform conversational query into standalone query using LLM.
-        
-#         This addresses the core problem: conversational queries often have implicit
-#         context (pronouns, references to previous topics) that hurt retrieval quality.
-        
-#         Examples:
-#         - "What about lambda functions?" → "What are lambda functions in Python?"
-#         - "How does it work?" → "How do SQL window functions work?"
-#         - "Can you explain that better?" → "Can you explain list comprehensions in Python?"
-        
-#         Args:
-#             question: User's original question
-#             conversation: Conversation state with history
-#             topic: Current topic context
-            
-#         Returns:
-#             Standalone query suitable for semantic search
-#         """
-#         # If no conversation history, use original question
-#         if not conversation or not conversation.messages:
-#             logger.debug("No conversation history - using original query")
-#             return question
-        
-#         # Get recent conversation for context
-#         history_text = conversation.format_history_for_prompt(max_messages=4)
-        
-#         # Build transformation prompt using template
-#         transformation_prompt = QUERY_TRANSFORMATION_TEMPLATE.format(
-#             topic=topic.value if topic else 'General Data Engineering',
-#             history=history_text,
-#             question=question
-#         )
+    E --> T[Transform]
+    T --> L[Load]
+    L --> DW[(Data Warehouse)]
+```
 
-#         try:
-#             # Use structured output for reliable parsing
-#             structured_llm = self.llm.with_structured_output(TransformedQuery)
-#             result = structured_llm.invoke(transformation_prompt)
-            
-#             logger.info(
-#                 f"Query transformed: '{question}' → '{result.standalone_query}' "
-#                 f"(required history: {result.requires_history})"
-#             )
-            
-#             return result.standalone_query
-            
-#         except Exception as e:
-#             # Fallback to original query on error
-#             logger.warning(f"Query transformation failed: {e}, using original query")
-#             return question
-    
-#     def answer_question(
-#         self,
-#         question: str,
-#         conversation: Optional[ConversationState] = None,
-#         topic: Optional[Topic] = None,
-#     ) -> RAGResponse:
-#         """
-#         Answer a user question using RAG.
-        
-#         Args:
-#             question: User's question
-#             conversation: Conversation state for history
-#             topic: Optional topic filter for retrieval
-            
-#         Returns:
-#             RAGResponse with generated answer
-#         """
-#         if not question or not question.strip():
-#             return RAGResponse(
-#                 content="Please provide a valid question.",
-#                 error="Invalid question",
-#             )
-        
-#         try:
-#             # Transform query using conversation history for better retrieval
-#             transformed_query = self._transform_query(question, conversation, topic)
-            
-#             # Retrieve relevant documents using transformed query
-#             results = self.retrieval.retrieve(transformed_query, topic=topic)
-            
-#             # Format conversation history
-#             history = "This is the start of the conversation."
-#             if conversation:
-#                 history = conversation.format_history_for_prompt()
-            
-#             # Choose appropriate prompt and build chain based on whether we have context
-#             if results:
-#                 # Scenario A: Knowledge base has relevant information
-#                 context = self.retrieval.format_context(results)
-#                 chain = self._qa_prompt_with_context | self.llm | self._parser
-                
-#                 response = chain.invoke({
-#                     "context": context,
-#                     "history": history,
-#                     "question": question,
-#                 })
-                
-#                 # Add KB indicator to response
-#                 response = f"📚 **From Knowledge Base**\n\n{response}"
-                
-#             else:
-#                 # Scenario B: No relevant KB content found
-#                 chain = self._qa_prompt_without_context | self.llm | self._parser
-                
-#                 response = chain.invoke({
-#                     "history": history,
-#                     "question": question,
-#                 })
-                
-#                 # Add general knowledge indicator to response
-#                 response = f"💡 **General Guidance** (not from curated knowledge base)\n\n{response}"
-            
-#             # Validate response
-#             if not response:
-#                 return RAGResponse(
-#                     content="I couldn't generate a sufficient answer. Please try rephrasing your question.",
-#                     sources=results,
-#                     topic=topic,
-#                     error="Response too short",
-#                 )
-            
-#             return RAGResponse(
-#                 content=response,
-#                 sources=results,
-#                 topic=topic,
-#             )
-            
-#         except Exception as e:
-#             logger.exception("Error answering question")
-#             return RAGResponse(
-#                 # TODO 
-#                 content=self._get_error_message(str(e)),
-#                 topic=topic,
-#                 error=str(e),
-#             )
-    
-#     def generate_practice_questions(
-#         self,
-#         topic: Topic,
-#         conversation: Optional[ConversationState] = None,
-#     ) -> RAGResponse:
-#         """
-#         Generate practice interview questions for a topic.
-        
-#         Args:
-#             topic: Topic to generate questions for
-#             conversation: Conversation state for context
-            
-#         Returns:
-#             RAGResponse with practice content
-#         """
-#         try:
-#             # Get comprehensive topic competencies
-#             results = self.retrieval.get_topic_competencies(topic)
-#             context = self.retrieval.format_context(results)
-            
-#             # Build and execute chain
-#             chain = self._practice_prompt | self.llm | self._parser
-            
-#             response = chain.invoke({
-#                 "context": context,
-#                 "topic": topic.value,
-#             })
-            
-#             # Validate response
-#             if not response or len(response.strip()) < self.config.min_response_length:
-#                 return RAGResponse(
-#                     content=f"I couldn't generate sufficient practice content for {topic.value}. Please try again.",
-#                     sources=results,
-#                     topic=topic,
-#                     error="Response too short",
-#                 )
-            
-#             return RAGResponse(
-#                 content=response,
-#                 sources=results,
-#                 topic=topic,
-#             )
-            
-#         except Exception as e:
-#             logger.error(f"Error generating practice questions: {e}")
-#             return RAGResponse(
-#                 content=f"Error generating {topic.value} practice questions. Please try again.",
-#                 topic=topic,
-#                 error=str(e),
-#             )
-    
-#     @staticmethod
-#     def _get_error_message(error: str) -> str:
-#         """
-#         Convert technical errors to user-friendly messages.
-        
-#         Args:
-#             error: Error string
-            
-#         Returns:
-#             User-friendly error message
-#         """
-#         error_lower = error.lower()
-        
-#         if "timeout" in error_lower:
-#             return "The request timed out. Please try again with a simpler question."
-#         elif "rate limit" in error_lower:
-#             return "Too many requests. Please wait a moment and try again."
-#         elif "authentication" in error_lower or "credentials" in error_lower:
-#             return "Authentication error. Please check AWS credentials configuration."
-#         else:
-#             return "I encountered an error. Please try again or rephrase your question."
+GUIDELINES:
+1. Use the provided knowledge base context when available
+2. Choose the appropriate format based on what the user is asking
+3. Be accurate and practical - focus on real interview scenarios
+4. If you don't know something, say so
+5. For architecture questions, include Mermaid diagrams when visualization helps"""
 
 
-# def create_chat_service(
-#     llm: BaseChatModel,
-#     retrieval_service: RetrievalService,
-# ) -> ChatService:
-#     """
-#     Factory function to create a ChatService instance.
+def _get_preprocessing_prompt() -> str:
+    """
+    Build preprocessing prompt with dynamic topic definitions from config.
+    This ensures topic definitions stay in sync with config/topics.py.
+    """
+    from config.topics import get_topic_definitions_for_prompt, get_classification_rules_for_prompt, get_topic_names
     
-#     Args:
-#         llm: Language model
-#         retrieval_service: Retrieval service
+    topic_list = ", ".join([f"'{t}'" for t in get_topic_names()])
+    
+    return f"""Analyze this user message and prepare it for document retrieval.
+
+TOPIC DEFINITIONS (our knowledge base structure):
+{get_topic_definitions_for_prompt()}
+
+CLASSIFICATION RULES:
+{get_classification_rules_for_prompt()}
+
+RECENT USER MESSAGES (most recent = most important):
+{{history}}
+
+CURRENT MESSAGE: "{{message}}"
+
+TRANSFORMATION RULES:
+1. The CURRENT MESSAGE is what the user wants NOW - focus on this
+2. Use previous messages ONLY to resolve references ("it", "that", "this", "more")
+3. Include the topic from context if the current message has references
+4. Keep the standalone query concise (under 20 words)
+5. topic must be exactly one of: {topic_list}, or null if no specific topic
+
+EXAMPLES:
+- History: ["list comprehensions", "what about dictionary comprehensions?"]
+  Current: "show me examples"
+  → standalone_query: "Examples of dictionary comprehensions in Python"
+  → topic: "Python"
+
+- History: []
+  Current: "data warehouse vs lakehouse"
+  → standalone_query: "What is the difference between data warehouse and data lakehouse?"
+  → topic: "ETL"  (warehousing concepts are in ETL docs)
+
+- History: []
+  Current: "explain ACID properties"
+  → standalone_query: "Explain ACID properties in databases"
+  → topic: "Database"
+
+- History: []
+  Current: "hello"
+  → standalone_query: "greeting"
+  → topic: null
+
+Now process the current message:"""
+
+
+# Legacy constant for backward compatibility (now generated dynamically)
+PREPROCESSING_PROMPT = _get_preprocessing_prompt()
+
+QA_PROMPT_TEMPLATE = """<context>
+{context}
+</context>
+
+<conversation_history>
+{history}
+</conversation_history>
+
+<user_question>
+{question}
+</user_question>
+
+Instructions:
+- Answer based on the <context> when relevant, using [Source N] citations for each reference
+- Number each unique context document as [Source 1], [Source 2], etc.
+- If context doesn't cover the topic, use your general knowledge but mention it
+- Be concise and interview-focused
+- Include practical examples when helpful
+- End with a "📖 Sources Used:" section listing all referenced sources with their topics and subtopics
+
+Your response:"""
+
+PRACTICE_QUESTIONS_PROMPT = """<context>
+{context}
+</context>
+
+Generate interview practice content for {topic}.
+
+Create:
+1. **Entry-Level Questions** (2-3 questions)
+   - Focus on fundamentals and definitions
+   
+2. **Mid-Level Questions** (2-3 questions)  
+   - Practical scenarios and problem-solving
+   
+3. **Advanced Questions** (1-2 questions)
+   - System design, optimization, trade-offs
+
+For each question, briefly note what a good answer should cover.
+
+Your response:"""
+
+
+# =============================================================================
+# CHAT SERVICE
+# =============================================================================
+
+class ChatService:
+    """
+    Simplified chat service with proper conversation history support.
+    
+    Flow:
+    1. Preprocess: Transform query + extract topic (1 LLM call)
+    2. Retrieve: Get relevant docs using standalone query + topic filter
+    3. Generate: Produce answer with context (1 LLM call)
+    """
+    
+    def __init__(
+        self,
+        llm: BaseChatModel,
+        retrieval_service: RetrievalService,
+        llm_config: Optional[LLMConfig] = None,
+    ):
+        self.llm = llm
+        self.retrieval = retrieval_service
+        self.config = llm_config or get_config().llm
+        self._parser = StrOutputParser()
         
-#     Returns:
-#         Configured ChatService instance
-#     """
-#     return ChatService(llm, retrieval_service)
+        # Initialize prompts
+        self._qa_prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", QA_PROMPT_TEMPLATE),
+        ])
+        
+        self._practice_prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT),
+            ("human", PRACTICE_QUESTIONS_PROMPT),
+        ])
+    
+    def _format_history_for_preprocessing(self, messages: List[Dict], max_messages: int = 6) -> str:
+        """
+        Format conversation history for preprocessing prompt.
+        
+        IMPORTANT: Includes BOTH user and assistant messages to properly handle:
+        - User selections from choices offered by assistant
+        - Follow-up questions that reference assistant responses
+        - Context from previous exchanges
+        
+        The last assistant message is especially important when user is making a selection.
+        """
+        if not messages:
+            return "No previous messages."
+        
+        # Take last N messages, including both roles
+        recent = messages[-max_messages:]
+        
+        if not recent:
+            return "No previous messages."
+        
+        # Format with role labels, increased truncation to capture choices
+        formatted = []
+        for i, msg in enumerate(recent):
+            role = "User" if msg["role"] == "user" else "Assistant"
+            content = msg["content"]
+            # Use 400 chars to capture offered choices/options
+            content = content[:400] + "..." if len(content) > 400 else content
+            formatted.append(f"{role}: {content}")
+        
+        return "\n".join(formatted) if formatted else "No previous messages."
+    
+    def _format_history_for_generation(self, messages: List[Dict], max_messages: int = 6) -> str:
+        """
+        Format conversation history for answer generation.
+        
+        Includes both user and assistant messages for context.
+        """
+        if not messages:
+            return "No previous conversation."
+        
+        # Take last N messages
+        recent = messages[-max_messages:]
+        
+        formatted = []
+        for msg in recent:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            # Truncate long messages
+            content = msg["content"][:300] + "..." if len(msg["content"]) > 300 else msg["content"]
+            formatted.append(f"{role}: {content}")
+        
+        return "\n".join(formatted)
+    
+    @traceable(name="preprocess_query")
+    def _preprocess_query(
+        self,
+        message: str,
+        history: List[Dict],
+    ) -> PreprocessedQuery:
+        """
+        Single LLM call to transform query and extract topic.
+        
+        Args:
+            message: User's current message
+            history: Conversation history
+            
+        Returns:
+            PreprocessedQuery with standalone_query and optional topic
+        """
+        history_text = self._format_history_for_preprocessing(history)
+        
+        prompt = PREPROCESSING_PROMPT.format(
+            history=history_text,
+            message=message,
+        )
+        
+        try:
+            structured_llm = self.llm.with_structured_output(PreprocessedQuery)
+            result = structured_llm.invoke(prompt)
+            
+            logger.info(
+                f"Preprocessed: '{message}' → query='{result.standalone_query}', topic={result.topic}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Preprocessing failed: {e}, using original message")
+            return PreprocessedQuery(
+                standalone_query=message,
+                topic=None,
+            )
+    
+    @traceable(name="answer")
+    def answer(
+        self,
+        message: str,
+        history: List[Dict],
+    ) -> RAGResponse:
+        """
+        Main entry point - answer a user message with full RAG pipeline.
+        
+        Args:
+            message: User's current message
+            history: List of previous messages [{"role": "user/assistant", "content": "..."}]
+            
+        Returns:
+            RAGResponse with generated answer
+        """
+        if not message or not message.strip():
+            return RAGResponse(
+                content="Please provide a question.",
+                error="Empty message",
+            )
+        
+        try:
+            # Step 1: Preprocess (LLM call #1)
+            preprocessed = self._preprocess_query(message, history)
+            
+            # Convert topic string to Topic enum if present
+            topic = None
+            if preprocessed.topic:
+                topic = Topic.from_string(preprocessed.topic)
+            
+            # Step 2: Retrieve relevant documents
+            results = self.retrieval.retrieve(
+                query=preprocessed.standalone_query,
+                topic=topic,
+            )
+            
+            # Step 3: Generate response (LLM call #2)
+            context = self.retrieval.format_context(results)
+            history_text = self._format_history_for_generation(history)
+            
+            chain = self._qa_prompt | self.llm | self._parser
+            
+            response = chain.invoke({
+                "context": context,
+                "history": history_text,
+                "question": preprocessed.standalone_query,
+            })
+            
+            return RAGResponse(
+                content=response,
+                sources=results,
+                topic=topic,
+            )
+            
+        except Exception as e:
+            logger.exception("Error in answer()")
+            return RAGResponse(
+                content="I encountered an error. Please try again.",
+                error=str(e),
+            )
+    
+    @traceable(name="answer_stream")
+    def answer_stream(
+        self,
+        message: str,
+        history: List[Dict],
+    ):
+        """
+        Streaming version of answer() - yields tokens as they're generated.
+        
+        Args:
+            message: User's current message
+            history: List of previous messages
+            
+        Yields:
+            str: Response tokens as they're generated
+            
+        Returns:
+            After iteration completes, can access full_response via the generator
+        """
+        from typing import Generator
+        
+        if not message or not message.strip():
+            yield "Please provide a question."
+            return
+        
+        try:
+            # Step 1: Preprocess (non-streaming, ~1s)
+            preprocessed = self._preprocess_query(message, history)
+            
+            # Convert topic string to Topic enum if present
+            topic = None
+            if preprocessed.topic:
+                topic = Topic.from_string(preprocessed.topic)
+            
+            # Step 2: Retrieve relevant documents (non-streaming)
+            results = self.retrieval.retrieve(
+                query=preprocessed.standalone_query,
+                topic=topic,
+            )
+            
+            # Step 3: Generate response with STREAMING (LLM call #2)
+            context = self.retrieval.format_context(results)
+            history_text = self._format_history_for_generation(history)
+            
+            chain = self._qa_prompt | self.llm | self._parser
+            
+            full_response = ""
+            for chunk in chain.stream({
+                "context": context,
+                "history": history_text,
+                "question": preprocessed.standalone_query,
+            }):
+                full_response += chunk
+                yield chunk
+            
+            # Store metadata for potential access after streaming
+            self._last_response = RAGResponse(
+                content=full_response,
+                sources=results,
+                topic=topic,
+            )
+            
+            logger.info(f"Streamed response: {len(full_response)} chars, topic={topic}")
+            
+        except Exception as e:
+            logger.exception("Error in answer_stream()")
+            yield "I encountered an error. Please try again."
+    
+    def get_last_response(self) -> Optional[RAGResponse]:
+        """Get the last RAGResponse from answer_stream() for metadata access."""
+        return getattr(self, '_last_response', None)
+    
+    def generate_practice_questions(
+        self,
+        topic: Topic,
+    ) -> RAGResponse:
+        """
+        Generate practice interview questions for a specific topic.
+        
+        Args:
+            topic: Topic to generate questions for
+            
+        Returns:
+            RAGResponse with practice content
+        """
+        try:
+            # Get topic competencies
+            results = self.retrieval.get_topic_competencies(topic)
+            context = self.retrieval.format_context(results)
+            
+            chain = self._practice_prompt | self.llm | self._parser
+            
+            response = chain.invoke({
+                "context": context,
+                "topic": topic.value,
+            })
+            
+            return RAGResponse(
+                content=response,
+                sources=results,
+                topic=topic,
+            )
+            
+        except Exception as e:
+            logger.error(f"Error generating practice questions: {e}")
+            return RAGResponse(
+                content=f"Error generating {topic.value} practice questions. Please try again.",
+                topic=topic,
+                error=str(e),
+            )

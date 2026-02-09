@@ -61,7 +61,7 @@ def cmd_test() -> int:
     from services.ingestion import IngestionService
     from services.retrieval import RetrievalService
     from services.chat import ChatService
-    from core.models import Topic
+    from schemas import Topic
     from utils.helper_cred import get_llm, get_embeddings
     
     logger.info("Running RAG pipeline test...")
