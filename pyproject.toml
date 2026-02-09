@@ -30,3 +30,48 @@ dependencies = [
     "tiktoken>=0.12.0",
     "transformers>=4.38.0",
 ]
+
+
+[tool.ruff]
+line-length = 100
+
+# Assume Python 3.12
+target-version = "py312"
+
+# In addition to the standard set of exclusions, exclude the following directories.
+extend-exclude = [".venv", "ipynb_experiments", "frontend"]
+
+# Group violations by containing file.
+output-format = "grouped"
+
+[tool.ruff.lint]
+# Enable import rules
+select = ["ALL"]
+ignore = [
+    "D100",    # Missing module docstring
+    "D203",    # 1 blank line required before class docstring
+    "D212",    # Multi-line docstring summary should start at the first line
+    "COM819",  # Trailing comma prohibited
+    "TD",      # TODO comments
+    "FIX",     # Fixme comments
+    "TRY300",  # Consider moving this statement to an else block (style preference)
+    "PLW0603", # Using global statement (needed for our tool pattern)
+]
+extend-select = ["I"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**/*.py" = ["S101", "ANN201", "D103", "D101"]
+"alembic/**/*.py" = ["INP", "ERA", "T", "D"]
+"**/routers/**/*.py" = ["D417", "FAST001"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+exclude = ["alembic", "frontend"]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.0",
+    "pre-commit>=4.0.0",
+    "ruff>=0.14.9",
+]
