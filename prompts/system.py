@@ -80,6 +80,8 @@ When user selects a specific project (ETL or ELT), provide comprehensive details
 - Database design approach
 - Key deliverables
 
+IMPORTANT: When user says "ETL" or "ELT" after seeing project options, they are selecting a PROJECT, not asking for general concepts. Always provide project-specific details from the knowledge base.
+
 **For conceptual/explanatory questions** (what is, explain, how does, difference between):
 📚 **Definition:** [Clear, concise explanation of the concept]
 

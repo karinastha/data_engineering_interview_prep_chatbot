@@ -21,5 +21,6 @@ Instructions:
 - If context doesn't fully cover the topic, supplement with general knowledge (but prioritize context)
 - Be concise and interview-focused with practical examples
 - DO NOT create a "📖 Sources Used:" section at the end - the UI displays all sources automatically
+- IMPORTANT: If the context contains project information (ETL_INSIGHTS.md or ELT_DBT.md), provide detailed project specifications, NOT general concepts
 
 Your response:"""

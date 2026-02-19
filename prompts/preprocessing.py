@@ -60,6 +60,36 @@ EXAMPLES:
   → is_greeting: false
 
 - History: []
+  Current: "give me real world ETL projects" or "show me hands-on projects"
+  → standalone_query: "Real world data engineering projects"
+  → topic: "Projects"
+  → is_greeting: false
+
+- History: []
+  Current: "ETL project" or "ELT project" or "portfolio projects"
+  → standalone_query: "Data engineering project assignments"
+  → topic: "Projects"
+  → is_greeting: false
+
+- History: ["Assistant: I have hands-on projects: 1. ETL to Insights 2. ELT with dbt. Which interests you?"]
+  Current: "ELT"
+  → standalone_query: "ELT project details and requirements"
+  → topic: "Projects"
+  → is_greeting: false
+
+- History: ["Assistant: Real-World Data Engineering Projects: 1. ETL project 2. ELT project"]
+  Current: "ETL"
+  → standalone_query: "ETL project specifications and implementation"
+  → topic: "Projects"
+  → is_greeting: false
+
+- History: ["Assistant: Which project type interests you - ETL or ELT?"]
+  Current: "tell me about the ELT one"
+  → standalone_query: "ELT project details"
+  → topic: "Projects"
+  → is_greeting: false
+
+- History: []
   Current: "hello" or "hi" or "hey" or "good morning"
   → standalone_query: "greeting"
   → topic: null
