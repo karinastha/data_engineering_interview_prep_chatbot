@@ -121,6 +121,25 @@ class ChatService:
         if preprocessed.topic:
             topic = Topic.from_string(preprocessed.topic)
 
+        # Check if this is a greeting - skip retrieval if so
+        if preprocessed.is_greeting:
+            logger.info("Greeting detected, skipping retrieval")
+            full_response = ""
+            for chunk in self._generation.generate_without_retrieval_stream(
+                query=preprocessed.standalone_query,
+                history=history,
+            ):
+                full_response += chunk
+                yield chunk
+
+            # Store response WITHOUT sources
+            self._last_response = RAGResponse(
+                content=full_response,
+                sources=[],
+                topic=None,
+            )
+            return
+
         # Step 2: Retrieve relevant documents (non-streaming)
         results = self._retrieval.retrieve(
             query=preprocessed.standalone_query,

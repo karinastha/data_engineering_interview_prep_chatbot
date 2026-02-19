@@ -42,6 +42,10 @@ class PreprocessedQuery(BaseModel):
         None,
         description=_get_topic_description(),
     )
+    is_greeting: bool = Field(
+        default=False,
+        description="True if message is a greeting/small talk that doesn't need retrieval",
+    )
 
 
 class PreprocessingService:

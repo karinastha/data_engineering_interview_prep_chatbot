@@ -13,11 +13,13 @@ QA_PROMPT_TEMPLATE = """<context>
 </user_question>
 
 Instructions:
-- Answer based on the <context> when relevant, using [Source N] citations for each reference
-- Number each unique context document as [Source 1], [Source 2], etc.
-- If context doesn't cover the topic, use your general knowledge but mention it
-- Be concise and interview-focused
-- Include practical examples when helpful
-- End with a "📖 Sources Used:" section listing all referenced sources
+- Answer based on the <context> provided above
+- Use inline [Source N] citations throughout your answer (e.g., "According to [Source 1], CDC allows... [Source 2] mentions that...")
+- Each [Source N] in the context gets its own number: [Source 1], [Source 2], [Source 3], etc.
+- When MULTIPLE sources are provided, try to incorporate information from ALL of them to give a comprehensive answer
+- If you use information from a source, cite it with [Source N]
+- If context doesn't fully cover the topic, supplement with general knowledge (but prioritize context)
+- Be concise and interview-focused with practical examples
+- DO NOT create a "📖 Sources Used:" section at the end - the UI displays all sources automatically
 
 Your response:"""

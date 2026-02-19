@@ -45,21 +45,34 @@ EXAMPLES:
   Current: "show me examples"
   → standalone_query: "Examples of dictionary comprehensions in Python"
   → topic: "Python"
+  → is_greeting: false
 
 - History: []
   Current: "data warehouse vs lakehouse"
   → standalone_query: "What is the difference between data warehouse and data lakehouse?"
   → topic: "ETL"  (warehousing concepts are in ETL docs)
+  → is_greeting: false
 
 - History: []
   Current: "explain ACID properties"
   → standalone_query: "Explain ACID properties in databases"
   → topic: "Database"
+  → is_greeting: false
 
 - History: []
-  Current: "hello"
+  Current: "hello" or "hi" or "hey" or "good morning"
   → standalone_query: "greeting"
   → topic: null
+  → is_greeting: true
+
+- History: []
+  Current: "thanks" or "thank you"
+  → standalone_query: "acknowledgment"
+  → topic: null
+  → is_greeting: true
+
+IMPORTANT: Set is_greeting=true ONLY for pure greetings/thanks/small talk.
+Questions like "hi, explain ETL" should have is_greeting=false.
 
 Now process the current message:"""
 

@@ -190,12 +190,14 @@ class RetrievalService:
         """
         Format retrieval results into context string for LLM.
 
+        Includes topic and subtopic metadata so LLM can generate proper citations.
+
         Args:
             results: List of RetrievalResult objects
             max_length: Maximum context length (uses config if None)
 
         Returns:
-            Formatted context string
+            Formatted context string with metadata for citations
 
         """
         if not results:
@@ -207,8 +209,12 @@ class RetrievalService:
         current_length = 0
 
         for i, result in enumerate(results, 1):
-            # Format individual result
-            section = f"[Source {i}]\n{result.content}\n"
+            # Format individual result with topic/subtopic metadata for proper citations
+            topic_info = f"Topic: {result.topic}"
+            if result.subtopic:
+                topic_info += f" - Subtopic: {result.subtopic}"
+
+            section = f"[Source {i}] {topic_info}\n{result.content}\n"
 
             # Check length limit
             if current_length + len(section) > max_len:
