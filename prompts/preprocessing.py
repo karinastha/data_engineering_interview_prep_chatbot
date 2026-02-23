@@ -44,61 +44,73 @@ EXAMPLES:
 - History: ["list comprehensions", "what about dictionary comprehensions?"]
   Current: "show me examples"
   → standalone_query: "Examples of dictionary comprehensions in Python"
-  → topic: "Python"
+  → topics: ["Python"]
   → is_greeting: false
 
 - History: []
   Current: "data warehouse vs lakehouse"
   → standalone_query: "What is the difference between data warehouse and data lakehouse?"
-  → topic: "ETL"  (warehousing concepts are in ETL docs)
+  → topics: ["ETL"]  (warehousing concepts are in ETL docs)
   → is_greeting: false
 
 - History: []
   Current: "explain ACID properties"
   → standalone_query: "Explain ACID properties in databases"
-  → topic: "Database"
+  → topics: ["Database"]
   → is_greeting: false
 
 - History: []
   Current: "give me real world ETL projects" or "show me hands-on projects"
   → standalone_query: "Real world data engineering projects"
-  → topic: "Projects"
+  → topics: ["Projects"]
   → is_greeting: false
 
 - History: []
   Current: "ETL project" or "ELT project" or "portfolio projects"
   → standalone_query: "Data engineering project assignments"
-  → topic: "Projects"
+  → topics: ["Projects"]
   → is_greeting: false
 
 - History: ["Assistant: I have hands-on projects: 1. ETL to Insights 2. ELT with dbt. Which interests you?"]
   Current: "ELT"
   → standalone_query: "ELT project details and requirements"
-  → topic: "Projects"
+  → topics: ["Projects"]
   → is_greeting: false
 
 - History: ["Assistant: Real-World Data Engineering Projects: 1. ETL project 2. ELT project"]
   Current: "ETL"
   → standalone_query: "ETL project specifications and implementation"
-  → topic: "Projects"
+  → topics: ["Projects"]
   → is_greeting: false
 
 - History: ["Assistant: Which project type interests you - ETL or ELT?"]
   Current: "tell me about the ELT one"
   → standalone_query: "ELT project details"
-  → topic: "Projects"
+  → topics: ["Projects"]
+  → is_greeting: false
+
+- History: []
+  Current: "how do I use Python to build an ETL pipeline?"
+  → standalone_query: "How to build an ETL pipeline using Python"
+  → topics: ["Python", "ETL"]
+  → is_greeting: false
+
+- History: []
+  Current: "compare SQL joins and pandas merges"
+  → standalone_query: "Comparison of SQL joins and pandas DataFrame merges"
+  → topics: ["SQL", "Python"]
   → is_greeting: false
 
 - History: []
   Current: "hello" or "hi" or "hey" or "good morning"
   → standalone_query: "greeting"
-  → topic: null
+  → topics: []
   → is_greeting: true
 
 - History: []
   Current: "thanks" or "thank you"
   → standalone_query: "acknowledgment"
-  → topic: null
+  → topics: []
   → is_greeting: true
 
 IMPORTANT: Set is_greeting=true ONLY for pure greetings/thanks/small talk.
