@@ -12,15 +12,15 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _get_topic_description() -> str:
+def _get_topics_description() -> str:
     """Get dynamic topic list for Pydantic field description."""
     # Import here to avoid circular dependency: topics.py may depend on services
     from config.topics import get_topic_names  # noqa: PLC0415
 
     topics = get_topic_names()
     return (
-        f"Detected topic for metadata filtering. Must be exactly one of: "
-        f"{', '.join([repr(t) for t in topics])}, or null if no specific topic."
+        f"List of detected topics for metadata filtering. Each must be exactly one of: "
+        f"{', '.join([repr(t) for t in topics])}. Empty list if no specific topic detected."
     )
 
 
@@ -38,9 +38,9 @@ class PreprocessedQuery(BaseModel):
             "history to understand. Resolve pronouns like 'it', 'that', 'this' using context."
         ),
     )
-    topic: str | None = Field(
-        None,
-        description=_get_topic_description(),
+    topics: list[str] = Field(
+        default_factory=list,
+        description=_get_topics_description(),
     )
     is_greeting: bool = Field(
         default=False,
@@ -94,10 +94,10 @@ class PreprocessingService:
             result = structured_llm.invoke(prompt)
 
             logger.info(
-                "Preprocessed: '%s' → query='%s', topic=%s",
+                "Preprocessed: '%s' → query='%s', topics=%s",
                 message,
                 result.standalone_query,
-                result.topic,
+                result.topics,
             )
 
             return result
@@ -107,5 +107,5 @@ class PreprocessingService:
             logger.warning("Preprocessing failed: %s, using original message", e)
             return PreprocessedQuery(
                 standalone_query=message,
-                topic=None,
+                topics=[],
             )

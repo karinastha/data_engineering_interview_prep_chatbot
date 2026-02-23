@@ -214,7 +214,7 @@ class RetrievalService:
             if result.subtopic:
                 topic_info += f" - Subtopic: {result.subtopic}"
 
-            section = f"[Source {i}] {topic_info}\n{result.content}\n"
+            section = f"--- {topic_info} ---\n{result.content}\n"
 
             # Check length limit
             if current_length + len(section) > max_len:
