@@ -12,6 +12,8 @@ Architecture:
 
 from collections.abc import Generator
 
+from langsmith import traceable
+
 from schemas import RAGResponse, Topic
 from services.generation import GenerationService
 from services.preprocessing import PreprocessingService
@@ -49,6 +51,7 @@ class ChatService:
         self._retrieval = retrieval_service
         self._last_response: RAGResponse | None = None
 
+    @traceable(name="chat_answer", run_type="chain", metadata={"pipeline": "rag"})
     def answer(
         self,
         message: str,
@@ -93,6 +96,7 @@ class ChatService:
             topic=topics[0] if topics else None,
         )
 
+    @traceable(name="chat_answer_stream", run_type="chain", metadata={"pipeline": "rag_stream"})
     def answer_stream(
         self,
         message: str,
