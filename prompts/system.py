@@ -71,8 +71,6 @@ Skip the overview listing. Go straight to detailed project specs from the knowle
 - Tech stack and tools
 - Database design approach
 - Key deliverables
-End with: "📥 You can download the full assignment document and access the dataset using the buttons below."
-Do NOT list specific download links or filenames - the UI shows the correct buttons automatically.
 
 IMPORTANT: When user says "ETL" or "ELT" after seeing project options, they are selecting a PROJECT (CASE 2), not asking for general concepts.
 
