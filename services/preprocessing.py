@@ -46,6 +46,15 @@ class PreprocessedQuery(BaseModel):
         default=False,
         description="True if message is a greeting/small talk that doesn't need retrieval",
     )
+    project_resource_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of specific project types to show download resources for. "
+            "Valid values: 'ETL', 'ELT'. "
+            "Non-empty ONLY when user wants details about a SPECIFIC project. "
+            "CONSTRAINT: If non-empty, topics MUST be ['Projects']."
+        ),
+    )
 
 
 class PreprocessingService:
@@ -93,11 +102,22 @@ class PreprocessingService:
             structured_llm = self.llm.with_structured_output(PreprocessedQuery)
             result = structured_llm.invoke(prompt)
 
+            # Enforce constraint: project resources require Projects topic
+            if result.project_resource_types and "Projects" not in result.topics:
+                logger.warning(
+                    "Fixing topic mismatch: project_resources=%s but topics=%s "
+                    "→ forcing topics=['Projects']",
+                    result.project_resource_types,
+                    result.topics,
+                )
+                result.topics = ["Projects"]
+
             logger.info(
-                "Preprocessed: '%s' → query='%s', topics=%s",
+                "Preprocessed: '%s' → query='%s', topics=%s, project_resources=%s",
                 message,
                 result.standalone_query,
                 result.topics,
+                result.project_resource_types,
             )
 
             return result

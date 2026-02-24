@@ -89,12 +89,14 @@ class ChatService:
             results = []
 
         # Step 3: Generate response (LLM call #2)
-        return self._generation.generate(
+        response = self._generation.generate(
             query=preprocessed.standalone_query,
             results=results,
             history=history,
             topic=topics[0] if topics else None,
         )
+        response.project_resource_types = preprocessed.project_resource_types
+        return response
 
     @traceable(name="chat_answer_stream", run_type="chain", metadata={"pipeline": "rag_stream"})
     def answer_stream(
@@ -167,6 +169,7 @@ class ChatService:
             content=full_response,
             sources=results,
             topic=topic,
+            project_resource_types=preprocessed.project_resource_types,
         )
 
     def get_last_response(self) -> RAGResponse | None:

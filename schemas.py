@@ -220,6 +220,7 @@ class RAGResponse:
     sources: list[RetrievalResult] = field(default_factory=list)
     topic: Topic | None = None
     error: str | None = None
+    project_resource_types: list[str] = field(default_factory=list)
 
     @property
     def is_success(self) -> bool:

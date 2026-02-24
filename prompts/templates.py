@@ -20,5 +20,6 @@ Instructions:
 - Be concise and interview-focused with practical examples
 - Do NOT cite or reference source numbers in your answer - just use the information naturally
 - IMPORTANT: If the context contains project information (ETL_INSIGHTS.md or ELT_DBT.md), provide detailed project specifications, NOT general concepts
+- OFF-TOPIC: If the question is unrelated to data engineering (Python, SQL, databases, ETL/ELT, pipelines, interview prep), politely decline and redirect the user to a relevant topic instead of answering
 
 Your response:"""  # noqa: E501
