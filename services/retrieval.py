@@ -111,28 +111,22 @@ class RetrievalService:
         """
         Process raw results into RetrievalResult objects.
 
-        Applies similarity threshold filtering and converts distance scores
-        to similarity scores.
-
-        ChromaDB Distance Metrics:
-        - **Cosine Distance**: [0, 2] - Used for normalized embeddings (our case)
-          * 0 = identical vectors, 2 = opposite vectors
-          * Conversion: similarity = 1 - distance → [-1, 1], clamped to [0, 1]
-        - **L2/Euclidean**: [0, ∞) - Unbounded distance
-          * Conversion: similarity = 1 / (1 + distance)
+        Converts ChromaDB cosine distances to similarity scores and filters
+        out results below the configured similarity threshold.
 
         Args:
-            docs_with_scores: List of (Document, score) tuples from ChromaDB
+            docs_with_scores: List of (Document, score) tuples from ChromaDB,
+                where score is a cosine distance in [0, 2] (lower = more similar)
 
         Returns:
-            Filtered and processed results with normalized similarity scores
+            Filtered and processed results with similarity scores in [0, 1]
 
         """
         results = []
 
         for doc, score in docs_with_scores:
             # Convert ChromaDB distance to similarity score (0-1, higher is better)
-            similarity = self._distance_to_similarity(score)
+            similarity = self._cosine_distance_to_cosine_similarity(score)
 
             result = RetrievalResult(
                 content=doc.page_content,
@@ -157,30 +151,31 @@ class RetrievalService:
 
         return results
 
-    def _distance_to_similarity(self, distance: float) -> float:
+    def _cosine_distance_to_cosine_similarity(self, distance: float) -> float:
         """
-        Convert ChromaDB cosine distance to similarity score.
+        Convert ChromaDB cosine distance to cosine similarity score.
 
-        ChromaDB with cosine distance (hnsw:space = 'cosine'):
-        - Range: [0, 2] for normalized vectors
-        - 0 = identical vectors (similarity = 1)
-        - 1 = orthogonal vectors (similarity = 0)
-        - 2 = opposite vectors (similarity = -1, rare)
+        ChromaDB stores cosine distance = 1 - cosine_similarity, so the
+        inverse gives back the original cosine similarity:
+            similarity = 1 - distance
 
-        Conversion: similarity = 1 - distance
+        Distance-to-similarity mapping:
+        - distance 0.0 → similarity 1.0  (identical vectors)
+        - distance 1.0 → similarity 0.0  (orthogonal / unrelated)
+        - distance 2.0 → similarity -1.0 (opposite vectors, extremely rare in practice)
+
+        Scores below 0 are clamped to 0. This has no practical effect on
+        retrieval since any document with cosine_similarity < 0 is far below
+        the similarity_threshold and would be filtered out regardless.
 
         Args:
-            distance: ChromaDB cosine distance score (lower is better)
+            distance: ChromaDB cosine distance in [0, 2] (lower = more similar)
 
         Returns:
-            Similarity score in [0, 1] range (higher is better)
+            Cosine similarity clamped to [0, 1] (higher = more similar)
 
         """
-        # Cosine distance to similarity: subtract from 1
-        similarity = 1.0 - distance
-
-        # Clamp to [0, 1] range
-        return max(0.0, min(1.0, similarity))
+        return max(0.0, min(1.0, 1.0 - distance))
 
     def format_context(
         self,
