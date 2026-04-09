@@ -111,6 +111,22 @@ class DataConfig:
             "ELT": "ELT_DBT.md",
         }
 
+    @property
+    def project_resources(self) -> dict:
+        """Project resource links: local assignment file + Google Drive dataset."""
+        return {
+            "ETL": {
+                "title": "ETL to Insights Assignment",
+                "assignment_file": "ETL_INSIGHTS.md",
+                "dataset_drive_url": "https://drive.google.com/drive/u/0/folders/11ZB8bruNMcc8ofgjhwKInQ61NLMAKz7L",
+            },
+            "ELT": {
+                "title": "E-Commerce ELT Pipeline with dbt",
+                "assignment_file": "ELT_DBT.md",
+                "dataset_drive_url": "https://drive.google.com/drive/u/0/folders/1zTWQY6hvDGUE2HvdmEnnfs6gFoIJimRJ",
+            },
+        }
+
 
 @dataclass
 class AppConfig:

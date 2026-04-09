@@ -153,6 +153,55 @@ def render_sources_used(sources: list) -> None:
                     st.divider()
 
 
+def render_project_resources(project_types: list[str]) -> None:
+    """
+    Display download buttons for project assignment doc and dataset.
+
+    Takes an explicit list of project types (e.g. ["ETL"]) determined by
+    the preprocessing LLM, rather than inferring from source metadata.
+    """
+    if not project_types:
+        return
+
+    from config.settings import get_config
+
+    config = get_config()
+    resources = config.data.project_resources
+    projects_dir = config.project_root / config.data.projects_directory
+
+    for project_type in project_types:
+        if project_type in resources:
+            _render_resource_buttons(resources[project_type], projects_dir, project_type)
+
+
+_resource_button_counter = 0
+
+
+def _render_resource_buttons(info: dict, projects_dir, project_type: str) -> None:
+    """Render download + Drive link buttons for a single project."""
+    global _resource_button_counter
+    _resource_button_counter += 1
+
+    file_path = projects_dir / info["assignment_file"]
+
+    st.markdown(f"**📥 {info['title']} — Resources**")
+    col1, col2 = st.columns(2)
+    with col1:
+        if file_path.exists():
+            st.download_button(
+                "📄 Assignment Document",
+                data=file_path.read_text(encoding="utf-8"),
+                file_name=info["assignment_file"],
+                mime="text/markdown",
+                key=f"download_{project_type}_{_resource_button_counter}",
+            )
+    with col2:
+        st.link_button(
+            "📊 Dataset (Google Drive)",
+            info["dataset_drive_url"],
+        )
+
+
 def render_chat_messages() -> None:
     """Render all chat messages with mermaid support."""
     for message in st.session_state.messages:
@@ -160,3 +209,5 @@ def render_chat_messages() -> None:
             render_content_with_mermaid(message["content"])
             if message.get("sources"):
                 render_sources_used(message["sources"])
+            if message.get("project_resource_types"):
+                render_project_resources(message["project_resource_types"])

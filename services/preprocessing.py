@@ -12,15 +12,15 @@ from utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _get_topic_description() -> str:
+def _get_topics_description() -> str:
     """Get dynamic topic list for Pydantic field description."""
     # Import here to avoid circular dependency: topics.py may depend on services
     from config.topics import get_topic_names  # noqa: PLC0415
 
     topics = get_topic_names()
     return (
-        f"Detected topic for metadata filtering. Must be exactly one of: "
-        f"{', '.join([repr(t) for t in topics])}, or null if no specific topic."
+        f"List of detected topics for metadata filtering. Each must be exactly one of: "
+        f"{', '.join([repr(t) for t in topics])}. Empty list if no specific topic detected."
     )
 
 
@@ -38,9 +38,22 @@ class PreprocessedQuery(BaseModel):
             "history to understand. Resolve pronouns like 'it', 'that', 'this' using context."
         ),
     )
-    topic: str | None = Field(
-        None,
-        description=_get_topic_description(),
+    topics: list[str] = Field(
+        default_factory=list,
+        description=_get_topics_description(),
+    )
+    is_greeting: bool = Field(
+        default=False,
+        description="True if message is a greeting/small talk that doesn't need retrieval",
+    )
+    project_resource_types: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of specific project types to show download resources for. "
+            "Valid values: 'ETL', 'ELT'. "
+            "Non-empty ONLY when user wants details about a SPECIFIC project. "
+            "CONSTRAINT: If non-empty, topics MUST be ['Projects']."
+        ),
     )
 
 
@@ -89,11 +102,22 @@ class PreprocessingService:
             structured_llm = self.llm.with_structured_output(PreprocessedQuery)
             result = structured_llm.invoke(prompt)
 
+            # Enforce constraint: project resources require Projects topic
+            if result.project_resource_types and "Projects" not in result.topics:
+                logger.warning(
+                    "Fixing topic mismatch: project_resources=%s but topics=%s "
+                    "→ forcing topics=['Projects']",
+                    result.project_resource_types,
+                    result.topics,
+                )
+                result.topics = ["Projects"]
+
             logger.info(
-                "Preprocessed: '%s' → query='%s', topic=%s",
+                "Preprocessed: '%s' → query='%s', topics=%s, project_resources=%s",
                 message,
                 result.standalone_query,
-                result.topic,
+                result.topics,
+                result.project_resource_types,
             )
 
             return result
@@ -103,5 +127,5 @@ class PreprocessingService:
             logger.warning("Preprocessing failed: %s, using original message", e)
             return PreprocessedQuery(
                 standalone_query=message,
-                topic=None,
+                topics=[],
             )

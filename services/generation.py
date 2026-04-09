@@ -133,3 +133,49 @@ class GenerationService:
             sources=results,
             topic=topic,
         )
+
+    @traceable(name="generate_greeting_stream")
+    def generate_without_retrieval_stream(
+        self,
+        query: str,
+        history: list[dict],
+    ) -> Generator[str, None, None]:
+        """
+        Generate greeting/small talk response without retrieval.
+
+        Used for greetings and simple interactions that don't require
+        knowledge base context.
+
+        Args:
+            query: The preprocessed standalone query.
+            history: Conversation history for context.
+
+        Yields:
+            Response tokens as they're generated.
+
+        """
+        history_text = format_history_for_generation(history)
+
+        # Create a simple prompt without context
+        greeting_prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", SYSTEM_PROMPT),
+                (
+                    "human",
+                    "Conversation history:\n{history}\n\n"
+                    "User message: {query}\n\n"
+                    "Respond warmly and conversationally. Do NOT include citations or sources.",
+                ),
+            ],
+        )
+
+        chain = greeting_prompt | self.llm | self._parser
+
+        yield from chain.stream(
+            {
+                "history": history_text,
+                "query": query,
+            },
+        )
+
+        logger.info("Generated greeting response without retrieval")

@@ -44,11 +44,18 @@ def _init_chat_service() -> None:
     st.success("✅ Chatbot ready!")
 
 
-def add_message(role: str, content: str, sources: list | None = None) -> None:
+def add_message(
+    role: str,
+    content: str,
+    sources: list | None = None,
+    project_resource_types: list[str] | None = None,
+) -> None:
     """Add a message to conversation history with optional sources."""
     message = {"role": role, "content": content}
     if sources:
         message["sources"] = sources
+    if project_resource_types:
+        message["project_resource_types"] = project_resource_types
     st.session_state.messages.append(message)
 
 

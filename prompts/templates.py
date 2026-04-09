@@ -13,11 +13,13 @@ QA_PROMPT_TEMPLATE = """<context>
 </user_question>
 
 Instructions:
-- Answer based on the <context> when relevant, using [Source N] citations for each reference
-- Number each unique context document as [Source 1], [Source 2], etc.
-- If context doesn't cover the topic, use your general knowledge but mention it
-- Be concise and interview-focused
-- Include practical examples when helpful
-- End with a "📖 Sources Used:" section listing all referenced sources
+- Answer based on the <context> provided above
+- When MULTIPLE sources are provided, incorporate information from ALL of them to give a comprehensive answer
+- If context says "No relevant information found" AND user is asking for interview questions, DO NOT generate questions - instead ask them to pick a topic (Python, SQL, Database, or ETL)
+- For conceptual/explanatory questions, you may supplement with general knowledge if context is limited
+- Be concise and interview-focused with practical examples
+- Do NOT cite or reference source numbers in your answer - just use the information naturally
+- IMPORTANT: If the context contains project information (ETL_INSIGHTS.md or ELT_DBT.md), provide detailed project specifications, NOT general concepts
+- OFF-TOPIC: If the question is unrelated to data engineering (Python, SQL, databases, ETL/ELT, pipelines, interview prep), politely decline and redirect the user to a relevant topic instead of answering
 
-Your response:"""
+Your response:"""  # noqa: E501

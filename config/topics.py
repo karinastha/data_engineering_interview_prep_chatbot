@@ -166,8 +166,8 @@ def get_topic_display_string() -> str:
 
 
 def get_csv_file_mapping() -> dict:
-    """Get mapping of topic name to CSV filename (for ingestion)."""
-    return {t.name: t.csv_file for t in TOPICS}
+    """Get mapping of topic name to CSV filename (for ingestion). Excludes topics without a CSV file."""
+    return {t.name: t.csv_file for t in TOPICS if t.csv_file}
 
 
 def get_topic_by_name(name: str) -> TopicConfig | None:

@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from app.components import render_content_with_mermaid, render_sources_used
+from app.components import render_content_with_mermaid, render_project_resources, render_sources_used
 from app.session import add_message, get_chat_service, get_history
 from utils.text_processing import post_process_markdown
 
@@ -37,10 +37,13 @@ def handle_message_streaming(user_input: str) -> None:
         rag_response = chat_service.get_last_response()
         if rag_response and rag_response.sources:
             render_sources_used(rag_response.sources)
+        if rag_response and rag_response.project_resource_types:
+            render_project_resources(rag_response.project_resource_types)
 
     rag_response = chat_service.get_last_response()
     sources = rag_response.sources if rag_response else None
-    add_message("assistant", full_response, sources)
+    project_resource_types = rag_response.project_resource_types if rag_response else None
+    add_message("assistant", full_response, sources, project_resource_types)
 
 
 def handle_message(user_input: str) -> None:
@@ -65,5 +68,7 @@ def handle_message(user_input: str) -> None:
         render_content_with_mermaid(response.content)
         if response.sources:
             render_sources_used(response.sources)
+        if response.project_resource_types:
+            render_project_resources(response.project_resource_types)
 
-    add_message("assistant", response.content, response.sources)
+    add_message("assistant", response.content, response.sources, response.project_resource_types)

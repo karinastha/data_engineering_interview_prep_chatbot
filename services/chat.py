@@ -12,6 +12,8 @@ Architecture:
 
 from collections.abc import Generator
 
+from langsmith import traceable
+
 from schemas import RAGResponse, Topic
 from services.generation import GenerationService
 from services.preprocessing import PreprocessingService
@@ -49,6 +51,7 @@ class ChatService:
         self._retrieval = retrieval_service
         self._last_response: RAGResponse | None = None
 
+    @traceable(name="chat_answer", run_type="chain", metadata={"pipeline": "rag"})
     def answer(
         self,
         message: str,
@@ -74,25 +77,28 @@ class ChatService:
         # Step 1: Preprocess (LLM call #1)
         preprocessed = self._preprocessing.preprocess(message, history)
 
-        # Convert topic string to Topic enum if present
-        topic = None
-        if preprocessed.topic:
-            topic = Topic.from_string(preprocessed.topic)
+        # Convert topic strings to Topic enums
+        topics = [Topic.from_string(t) for t in preprocessed.topics if Topic.from_string(t)]
 
-        # Step 2: Retrieve relevant documents
-        results = self._retrieval.retrieve(
-            query=preprocessed.standalone_query,
-            topic=topic,
-        )
+        # Step 2: Retrieve relevant documents (loop over all detected topics)
+        if topics:
+            results = []
+            for t in topics:
+                results.extend(self._retrieval.retrieve(query=preprocessed.standalone_query, topic=t))
+        else:
+            results = []
 
         # Step 3: Generate response (LLM call #2)
-        return self._generation.generate(
+        response = self._generation.generate(
             query=preprocessed.standalone_query,
             results=results,
             history=history,
-            topic=topic,
+            topic=topics[0] if topics else None,
         )
+        response.project_resource_types = preprocessed.project_resource_types
+        return response
 
+    @traceable(name="chat_answer_stream", run_type="chain", metadata={"pipeline": "rag_stream"})
     def answer_stream(
         self,
         message: str,
@@ -116,16 +122,36 @@ class ChatService:
         # Step 1: Preprocess (non-streaming)
         preprocessed = self._preprocessing.preprocess(message, history)
 
-        # Convert topic string to Topic enum if present
-        topic = None
-        if preprocessed.topic:
-            topic = Topic.from_string(preprocessed.topic)
+        # Convert topic strings to Topic enums
+        topics = [Topic.from_string(t) for t in preprocessed.topics if Topic.from_string(t)]
+        topic = topics[0] if topics else None
 
-        # Step 2: Retrieve relevant documents (non-streaming)
-        results = self._retrieval.retrieve(
-            query=preprocessed.standalone_query,
-            topic=topic,
-        )
+        # Check if this is a greeting - skip retrieval if so
+        if preprocessed.is_greeting:
+            logger.info("Greeting detected, skipping retrieval")
+            full_response = ""
+            for chunk in self._generation.generate_without_retrieval_stream(
+                query=preprocessed.standalone_query,
+                history=history,
+            ):
+                full_response += chunk
+                yield chunk
+
+            # Store response WITHOUT sources
+            self._last_response = RAGResponse(
+                content=full_response,
+                sources=[],
+                topic=None,
+            )
+            return
+
+        # Step 2: Retrieve relevant documents (loop over all detected topics)
+        if topics:
+            results = []
+            for t in topics:
+                results.extend(self._retrieval.retrieve(query=preprocessed.standalone_query, topic=t))
+        else:
+            results = []
 
         # Step 3: Generate response with streaming (LLM call #2)
         full_response = ""
@@ -143,9 +169,9 @@ class ChatService:
             content=full_response,
             sources=results,
             topic=topic,
+            project_resource_types=preprocessed.project_resource_types,
         )
 
     def get_last_response(self) -> RAGResponse | None:
         """Get the last RAGResponse from answer_stream() for metadata access."""
-        return self._last_response
         return self._last_response
