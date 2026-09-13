@@ -52,7 +52,7 @@ def display_header():
     st.markdown("""
     <div style='text-align: center; padding: 1rem; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 2rem;'>
         <h1 style='color: white; margin: 0;'>💼 DATA ENGINEERING INTERVIEW PREP ASSISTANT</h1>
-        <p style='color: #f0f0f0; margin: 0.5rem 0 0 0;'>Powered by Amazon Nova Lite & LangChain</p>
+        <p style='color: #f0f0f0; margin: 0.5rem 0 0 0;'>Powered by Ollama & LangChain</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -295,10 +295,10 @@ def display_sidebar():
         st.markdown("### 📚 About")
         st.markdown("""
         This chatbot helps you prepare for **Data Engineering interviews** using:
-        - Amazon Nova Lite (LLM)
+        - Ollama (Local LLM)
         - LangChain (RAG Framework)
         - ChromaDB (Vector Store)
-        - AWS Bedrock (Embeddings)
+        - HuggingFace (Embeddings)
         """)
         
         st.markdown("---")

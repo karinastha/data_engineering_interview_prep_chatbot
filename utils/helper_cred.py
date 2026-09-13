@@ -1,28 +1,21 @@
 import os
 from dotenv import load_dotenv
-from langchain_aws import ChatBedrock
+from langchain_ollama import ChatOllama
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 
 # Load environment variables (.env file)
 load_dotenv()
 
-# AWS Configuration
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-AWS_ACCESS_KEY_ID = os.getenv("aws_access_key_id")
-AWS_SECRET_ACCESS_KEY = os.getenv("aws_secret_access_key")
-AWS_SESSION_TOKEN = os.getenv("aws_session_token")
+# Ollama Configuration
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-# LANGCHAIN_TRACING_V2 = "true"
-# LANGCHAIN_API_KEY = os.getenv("LANGSMITH_API_KEY")
-# Initialize Nova Lite 
-llm = ChatBedrock(
-    model_id="amazon.nova-lite-v1:0",
-    region_name=AWS_REGION,
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    aws_session_token=AWS_SESSION_TOKEN,
-    model_kwargs={"temperature": 0.5, "max_tokens": 1000}
+# Initialize Ollama LLM
+llm = ChatOllama(
+    model=OLLAMA_MODEL,
+    base_url=OLLAMA_BASE_URL,
+    temperature=0.5
 )
 
 # Initialize HuggingFace Embeddings (free, local alternative)
@@ -34,4 +27,4 @@ embeddings = HuggingFaceEmbeddings(
 )
 
 # Export commonly used items
-__all__ = ['llm', 'embeddings', 'AWS_REGION', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN']
+__all__ = ['llm', 'embeddings', 'OLLAMA_MODEL', 'OLLAMA_BASE_URL']

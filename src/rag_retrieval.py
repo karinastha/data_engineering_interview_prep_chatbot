@@ -64,7 +64,7 @@ In a data ingestion pipeline:
 try:
     data = api_client.fetch_data()
 except APIException as e:
-    logger.error(f"API failed: {e}")
+    logger.error("API failed: %s", e)
     data = load_from_backup_source()
 ```
 This prevents entire pipeline failure when APIs are down."""
